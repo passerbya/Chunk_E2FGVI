@@ -1,3 +1,7 @@
+# This is fork of the Test script from E2FGVI that supports a larger amount of frames.
+Instead of loading all of the frames in VRAM, this breaks down the video into chunks and sends one chunk to the video card for processing at a time.
+All frames are still loaded in regular RAM, however, people have more of that than VRAM usually.  (This change hasn't been commited yet)
+
 # E<sup>2</sup>FGVI (CVPR 2022)
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/towards-an-end-to-end-framework-for-flow/video-inpainting-on-davis)](https://paperswithcode.com/sota/video-inpainting-on-davis?p=towards-an-end-to-end-framework-for-flow)
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/towards-an-end-to-end-framework-for-flow/video-inpainting-on-youtube-vos)](https://paperswithcode.com/sota/video-inpainting-on-youtube-vos?p=towards-an-end-to-end-framework-for-flow)
@@ -7,7 +11,7 @@
 
 English | [简体中文](README_zh-CN.md)
 
-This repository contains the official implementation of the following paper:
+This repository contains a fork of official implementation of the following paper:
 > **Towards An End-to-End Framework for Flow-Guided Video Inpainting**<br>
 > Zhen Li<sup>#</sup>, Cheng-Ze Lu<sup>#</sup>, Jianhua Qin, Chun-Le Guo<sup>*</sup>, Ming-Ming Cheng<br>
 > IEEE/CVF Conference on Computer Vision and Pattern Recognition (**CVPR**), 2022<br>
@@ -17,8 +21,6 @@ This repository contains the official implementation of the following paper:
 [[演示视频 (B站)](https://www.bilibili.com/video/BV1Ta411n7eH?spm_id_from=333.999.0.0)]
 [Project Page (TBD)]
 [Poster (TBD)]
-
-You can try our colab demo here: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12rwY2gtG8jVWlNx9pjmmM8uGmh5ue18G?usp=sharing)
 
 ## :star: News
 - *2022.05.15:* We release E<sup>2</sup>FGVI-HQ, which can handle videos with **arbitrary resolution**. This model could generalize well to much higher resolutions, while it only used 432x240 videos for training. Besides, it performs **better** than our original model on both PSNR and SSIM metrics. 
@@ -78,10 +80,7 @@ You can try our colab demo here: [![Open In Colab](https://colab.research.google
 - **Highly effiency**: Our method processes 432 × 240 videos at 0.12 seconds per frame on a Titan XP GPU, which is nearly 15× faster than previous flow-based methods. Besides, our method has the lowest FLOPs among all compared SOTA
 methods.
 
-## Work in Progress
-- [ ] Update website page
-- [ ] Hugging Face demo
-- [ ] Efficient inference
+
 
 ## Dependencies and Installation
 
@@ -93,20 +92,31 @@ methods.
 
 2. Create Conda Environment and Install Dependencies
 
-   ```bash
-   conda env create -f environment.yml
-   conda activate e2fgvi
+   ```bash or CMD
+      conda create -n e2fgvi python=3.7
+      conda activate e2fgvi
+      python -m pip install --upgrade pip
+      pip install matplotlib==3.4.1
+      pip install opencv-python==4.5.5.62
+      pip install vispy==0.9.3
+      pip install transforms3d==0.3.1
+      pip install networkx==2.3
+      pip install scikit-image==0.19.2
+      pip install pyaml==21.10.1
+      pip install torch==1.9.0+cu111 torchvision==0.10.0+cu111 torchaudio==0.9.0 -f https://download.pytorch.org/whl/torch_stable.html
+      pip install moviepy==1.0.3
+      pip install pyqt6==6.3.0
+      pip install mmcv-full -f https://download.openmmlab.com/mmcv/dist/cu111/torch1.9/index.html
+      pip install tensorboard matplotlib
    ```
    - Python >= 3.7
    - PyTorch >= 1.5
-   - CUDA >= 9.2
    - [mmcv-full](https://github.com/open-mmlab/mmcv#installation) (following the pipeline to install)
-
-   If the `environment.yml` file does not work for you, please follow [this issue](https://github.com/MCG-NKU/E2FGVI/issues/3) to solve the problem.
+   - CUDA 11.1 (It will work on Cuda 9.2+ but you will have to update the torch and mmcv wheel sources for a compatible version of CUDA with your graphics card)
 
 ## Get Started
 ### Prepare pretrained models
-Before performing the following steps, please download our pretrained model first.
+Before performing the following steps, please download their pretrained models from their readme [[Original Readme](https://github.com/MCG-NKU/E2FGVI/blob/master/README.md)].  The following links are copied from that Readme for your convencience.  There's no guarantee that they will still be at this location when you read this, which is why we ask you to download the models from the original author's readme.
 
 <table>
 <thead>
@@ -198,38 +208,7 @@ python test.py --model e2fgvi_hq --video <video_path> --mask <mask_path>  --ckpt
 </tbody>
 </table>
 
-The training and test split files are provided in `datasets/<dataset_name>`.
 
-For each dataset, you should place `JPEGImages` to `datasets/<dataset_name>`.
-
-Then, run `sh datasets/zip_dir.sh` (**Note**: please edit the folder path accordingly) for compressing each video in `datasets/<dataset_name>/JPEGImages`.
-
-Unzip downloaded mask files to `datasets`.
-
-The `datasets` directory structure will be arranged as: (**Note**: please check it carefully)
-```
-datasets
-   |- davis
-      |- JPEGImages
-         |- <video_name>.zip
-         |- <video_name>.zip
-      |- test_masks
-         |- <video_name>
-            |- 00000.png
-            |- 00001.png   
-      |- train.json
-      |- test.json
-   |- youtube-vos
-      |- JPEGImages
-         |- <video_id>.zip
-         |- <video_id>.zip
-      |- test_masks
-         |- <video_id>
-            |- 00000.png
-            |- 00001.png
-      |- train.json
-      |- test.json   
-   |- zip_file.sh
 ```
 ### Evaluation
 Run one of the following commands for evaluation:
@@ -247,28 +226,6 @@ The scores will also be saved in the `results/<model_name>_<dataset_name>` direc
 
 Please `--save_results` for further [evaluating temporal warping error](https://github.com/phoenix104104/fast_blind_video_consistency#evaluation).
 
-### Training
-Our training configures are provided in [`train_e2fgvi.json`](./configs/train_e2fgvi.json) (for E<sup>2</sup>FGVI) and [`train_e2fgvi_hq.json`](./configs/train_e2fgvi_hq.json) (for E<sup>2</sup>FGVI-HQ).
-
-Run one of the following commands for training:
-```shell
- # For training E2FGVI
- python train.py -c configs/train_e2fgvi.json
- # For training E2FGVI-HQ
- python train.py -c configs/train_e2fgvi_hq.json
-```
-You could run the same command if you want to resume your training.
-
-The training loss can be monitored by running:
-```shell
-tensorboard --logdir release_model                                                   
-```
-
-You could follow [this pipeline](https://github.com/MCG-NKU/E2FGVI#evaluation) to evaluate your model.
-## Results  
-
-### Quantitative results
-![quantitative_results](./figs/quantitative_results.png)
 ## Citation
 
    If you find our repo useful for your research, please consider citing our paper:
