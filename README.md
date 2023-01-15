@@ -1,6 +1,7 @@
 # This is fork of the Test script from E2FGVI that supports a larger amount of frames.
 Instead of loading all of the frames in VRAM, this breaks down the video into chunks and sends one chunk to the video card for processing at a time.
-All frames are still loaded in regular RAM, however, people have more of that than VRAM usually.  (This change hasn't been commited yet)
+All frames are still loaded in regular RAM, however, people have more of that than VRAM usually.
+The only significant change is test.py 
 
 # E<sup>2</sup>FGVI (CVPR 2022)
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/towards-an-end-to-end-framework-for-flow/video-inpainting-on-davis)](https://paperswithcode.com/sota/video-inpainting-on-davis?p=towards-an-end-to-end-framework-for-flow)

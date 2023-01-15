@@ -19,12 +19,8 @@ parser.add_argument("-m", "--mask", type=str, required=True)
 parser.add_argument("--model", type=str, choices=['e2fgvi', 'e2fgvi_hq'])
 parser.add_argument("--step", type=int, default=10)
 parser.add_argument("--num_ref", type=int, default=-1)
-parser.add_argument("--neighbor_stride", type=int, default=10)
+parser.add_argument("--neighbor_stride", type=int, default=5)
 parser.add_argument("--savefps", type=int, default=24)
-
-# frame_stride must be evenly divisible by neighbor_stride
-parser.add_argument("--frame_stride", type=int, default=40)
-
 
 # args for e2fgvi_hq (which can handle videos with arbitrary resolution)
 parser.add_argument("--set_size", action='store_true', default=False)
@@ -119,7 +115,7 @@ def main_worker():
         size = None
 
     net = importlib.import_module('model.' + args.model)
-    model = net.InpaintGenerator().half().to(device)
+    model = net.InpaintGenerator().to(device)
     data = torch.load(args.ckpt, map_location=device)
     model.load_state_dict(data)
     print(f'Loading model from: {args.ckpt}')
@@ -130,104 +126,57 @@ def main_worker():
     print(
         f'Loading videos and masks from: {args.video} | INPUT MP4 format: {args.use_mp4}'
     )
-    rframes = read_frame_from_videos(args)
-    rframes, size = resize_frames(rframes, size)
+    frames = read_frame_from_videos(args)
+    frames, size = resize_frames(frames, size)
     h, w = size[1], size[0]
-    video_length = len(rframes)
-    rmasks = read_mask(args.mask, size)
+    video_length = len(frames)
+    imgs = to_tensors()(frames).unsqueeze(0) * 2 - 1
+    frames = [np.array(f).astype(np.uint8) for f in frames]
 
+    masks = read_mask(args.mask, size)
+    binary_masks = [
+        np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in masks
+    ]
+    masks = to_tensors()(masks).unsqueeze(0)
+    imgs, masks = imgs.to(device), masks.to(device)
     comp_frames = [None] * video_length
 
-    framestride = args.frame_stride
-
-    x_frames = [rframes[i:i + framestride] for i in range(0, len(rframes), framestride)]
-    x_masks = [rmasks[i:i + framestride] for i in range(0, len(rmasks), framestride)]
+    # completing holes by e2fgvi
     print(f'Start test...')
-    for itern in range(0, len(x_frames), 1):
-        stride_length = len(x_frames[itern])
-
-        strides = len(x_frames)
-
-        #print(strides)
-        #print(stride_length)
-
-        loopstartframe = 0
-        loopendframe = stride_length
-
-        xfram = x_frames[itern]
-        xmask = x_masks[itern]
-
-        if (itern < strides - 1):
-            for xframappend in range(0, neighbor_stride):
-                xfram.append(x_frames[itern + 1][xframappend])
-                xmask.append(x_masks[itern + 1][xframappend])
-
-        # if (itern > 0):
-        #     for xframappend in range(1, neighbor_stride + 1):
-        #         xfram.insert(0, x_frames[itern - 1][len(x_frames[itern - 1]) - xframappend])
-        #         xmask.insert(0, x_masks[itern - 1][len(x_masks[itern - 1]) - xframappend])
-
-        imgs = to_tensors()(xfram).unsqueeze(0) * 2 - 1
-        frames = [np.array(f).astype(np.uint8) for f in xfram]
-
-        binary_masks = [
-            np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in xmask
+    for f in tqdm(range(0, video_length, neighbor_stride)):
+        neighbor_ids = [
+            i for i in range(max(0, f - neighbor_stride),
+                             min(video_length, f + neighbor_stride + 1))
         ]
-        masks = to_tensors()(xmask).unsqueeze(0)
-        imgs, masks = imgs.half().to(device), masks.half().to(device)
-
-        if (itern > 0):
-            loopstartframe = neighbor_stride
-        else:
-            loopstartframe = 0
-
-        if (itern < strides - 1):
-            loopendframe = stride_length + neighbor_stride
-        else:
-            loopendframe = stride_length
-
-        # completing holes by e2fgvi
-
-        for f in tqdm(range(loopstartframe, loopendframe, neighbor_stride)):
-            #print(f)
-            #print(f'meh {max(loopstartframe, f - neighbor_stride)} muh {min(loopendframe, f + neighbor_stride + 1)}')
-            neighbor_ids = [
-                i for i in range(max(loopstartframe, f - neighbor_stride),
-                                 min(loopendframe, f + neighbor_stride + 1))
-            ]
-            #print(neighbor_ids)
-            # The frame +- 5 frames before or after.  Beginning: zero frames before.   End: 0 frames after.
-
-            ref_ids = get_ref_index(f, neighbor_ids, loopendframe)
-            selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :]
-            selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :]
-
-            with torch.no_grad():
-                masked_imgs = selected_imgs * (1 - selected_masks)
-                mod_size_h = 60
-                mod_size_w = 108
-                h_pad = (mod_size_h - h % mod_size_h) % mod_size_h
-                w_pad = (mod_size_w - w % mod_size_w) % mod_size_w
-                masked_imgs = torch.cat(
-                    [masked_imgs, torch.flip(masked_imgs, [3])],
-                    3)[:, :, :, :h + h_pad, :]
-                masked_imgs = torch.cat(
-                    [masked_imgs, torch.flip(masked_imgs, [4])],
-                    4)[:, :, :, :, :w + w_pad].half()
-                pred_imgs, _ = model(masked_imgs, len(neighbor_ids))
-                pred_imgs = pred_imgs[:, :, :h, :w]
-                pred_imgs = (pred_imgs + 1) / 2
-                pred_imgs = pred_imgs.cpu().permute(0, 2, 3, 1).numpy() * 255
-                for i in range(0, len(neighbor_ids)):
-                    idx = neighbor_ids[i]
-                    img = np.array(pred_imgs[i]).astype(
-                        np.uint8) * binary_masks[idx] + frames[idx] * (
-                                  1 - binary_masks[idx])
-                    if comp_frames[(itern * framestride) + idx] is None:
-                        comp_frames[(itern * framestride) + idx] = img
-                    else:
-                        comp_frames[(itern * framestride) + idx] = comp_frames[(itern * framestride) + idx].astype(
-                            np.float32) * 0.5 + img.astype(np.float32) * 0.5
+        ref_ids = get_ref_index(f, neighbor_ids, video_length)
+        selected_imgs = imgs[:1, neighbor_ids + ref_ids, :, :, :]
+        selected_masks = masks[:1, neighbor_ids + ref_ids, :, :, :]
+        with torch.no_grad():
+            masked_imgs = selected_imgs * (1 - selected_masks)
+            mod_size_h = 60
+            mod_size_w = 108
+            h_pad = (mod_size_h - h % mod_size_h) % mod_size_h
+            w_pad = (mod_size_w - w % mod_size_w) % mod_size_w
+            masked_imgs = torch.cat(
+                [masked_imgs, torch.flip(masked_imgs, [3])],
+                3)[:, :, :, :h + h_pad, :]
+            masked_imgs = torch.cat(
+                [masked_imgs, torch.flip(masked_imgs, [4])],
+                4)[:, :, :, :, :w + w_pad]
+            pred_imgs, _ = model(masked_imgs, len(neighbor_ids))
+            pred_imgs = pred_imgs[:, :, :h, :w]
+            pred_imgs = (pred_imgs + 1) / 2
+            pred_imgs = pred_imgs.cpu().permute(0, 2, 3, 1).numpy() * 255
+            for i in range(len(neighbor_ids)):
+                idx = neighbor_ids[i]
+                img = np.array(pred_imgs[i]).astype(
+                    np.uint8) * binary_masks[idx] + frames[idx] * (
+                        1 - binary_masks[idx])
+                if comp_frames[idx] is None:
+                    comp_frames[idx] = img
+                else:
+                    comp_frames[idx] = comp_frames[idx].astype(
+                        np.float32) * 0.5 + img.astype(np.float32) * 0.5
 
     # saving videos
     print('Saving videos...')
@@ -260,13 +209,13 @@ def main_worker():
     imdata2 = ax2.imshow(comp_frames[0].astype(np.uint8))
 
     def update(idx):
-        imdata1.set_data(rframes[idx])
+        imdata1.set_data(frames[idx])
         imdata2.set_data(comp_frames[idx].astype(np.uint8))
 
     fig.tight_layout()
     anim = animation.FuncAnimation(fig,
                                    update,
-                                   frames=len(comp_frames),
+                                   frames=len(frames),
                                    interval=50)
     plt.show()
 
