@@ -6,8 +6,8 @@ from shutil import copyfile
 import torch
 import torch.multiprocessing as mp
 
-from core.trainer import Trainer
-from core.dist import (
+from .trainer import Trainer
+from e2fgvi.core.dist import (
     get_world_size,
     get_local_rank,
     get_global_rank,

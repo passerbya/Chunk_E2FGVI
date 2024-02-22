@@ -11,10 +11,10 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
-from core.lr_scheduler import MultiStepRestartLR, CosineAnnealingRestartLR
-from core.loss import AdversarialLoss
-from core.dataset import TrainDataset
-from model.modules.flow_comp import FlowCompletionLoss
+from e2fgvi.core.lr_scheduler import MultiStepRestartLR, CosineAnnealingRestartLR
+from e2fgvi.core.loss import AdversarialLoss
+from e2fgvi.core.dataset import TrainDataset
+from e2fgvi.model.modules.flow_comp import FlowCompletionLoss
 
 
 class Trainer:

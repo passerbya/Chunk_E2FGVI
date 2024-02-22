@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torchvision.transforms as transforms
 
-from core.utils import (TrainZipReader, TestZipReader,
+from .utils import (TrainZipReader, TestZipReader,
                         create_random_shape_with_random_motion, Stack,
                         ToTorchFormatTensor, GroupRandomHorizontalFlip)
 

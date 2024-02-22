@@ -5,10 +5,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.modules.flow_comp import SPyNet
-from model.modules.feat_prop import BidirectionalPropagation, SecondOrderDeformableAlignment
-from model.modules.tfocal_transformer import TemporalFocalTransformerBlock, SoftSplit, SoftComp
-from model.modules.spectral_norm import spectral_norm as _spectral_norm
+from .modules.flow_comp import SPyNet
+from .modules.feat_prop import BidirectionalPropagation, SecondOrderDeformableAlignment
+from .modules.tfocal_transformer_hq import TemporalFocalTransformerBlock, SoftSplit, SoftComp
+from .modules.spectral_norm import spectral_norm as _spectral_norm
 
 
 class BaseNetwork(nn.Module):
@@ -94,12 +94,13 @@ class Encoder(nn.Module):
         ])
 
     def forward(self, x):
-        bt, c, h, w = x.size()
-        h, w = h // 4, w // 4
+        bt, c, _, _ = x.size()
+        # h, w = h//4, w//4
         out = x
         for i, layer in enumerate(self.layers):
             if i == 8:
                 x0 = out
+                _, _, h, w = x0.size()
             if i > 8 and i % 2 == 0:
                 g = self.group[(i - 8) // 2]
                 x = x0.view(bt, g, -1, h, w)
@@ -160,8 +161,7 @@ class InpaintGenerator(BaseNetwork):
         t2t_params = {
             'kernel_size': kernel_size,
             'stride': stride,
-            'padding': padding,
-            'output_size': output_size
+            'padding': padding
         }
         self.ss = SoftSplit(channel // 2,
                             hidden,
@@ -169,8 +169,7 @@ class InpaintGenerator(BaseNetwork):
                             stride,
                             padding,
                             t2t_param=t2t_params)
-        self.sc = SoftComp(channel // 2, hidden, output_size, kernel_size,
-                           stride, padding)
+        self.sc = SoftComp(channel // 2, hidden, kernel_size, stride, padding)
 
         n_vecs = 1
         for i, d in enumerate(kernel_size):
@@ -244,6 +243,7 @@ class InpaintGenerator(BaseNetwork):
         # extracting features and performing the feature propagation on local features
         enc_feat = self.encoder(masked_frames.view(b * t, ori_c, ori_h, ori_w))
         _, c, h, w = enc_feat.size()
+        fold_output_size = (h, w)
         local_feat = enc_feat.view(b, t, c, h, w)[:, :l_t, ...]
         ref_feat = enc_feat.view(b, t, c, h, w)[:, l_t:, ...]
         local_feat = self.feat_prop_module(local_feat, pred_flows[0],
@@ -251,9 +251,9 @@ class InpaintGenerator(BaseNetwork):
         enc_feat = torch.cat((local_feat, ref_feat), dim=1)
 
         # content hallucination through stacking multiple temporal focal transformer blocks
-        trans_feat = self.ss(enc_feat.view(-1, c, h, w), b)
-        trans_feat = self.transformer(trans_feat)
-        trans_feat = self.sc(trans_feat, t)
+        trans_feat = self.ss(enc_feat.view(-1, c, h, w), b, fold_output_size)
+        trans_feat = self.transformer([trans_feat, fold_output_size])
+        trans_feat = self.sc(trans_feat[0], t, fold_output_size)
         trans_feat = trans_feat.view(b, t, -1, h, w)
         enc_feat = enc_feat + trans_feat
 
