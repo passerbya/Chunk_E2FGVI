@@ -67,11 +67,11 @@ def get_ref_index(f, neighbor_ids, length):
                 ref_index.append(i)
     return ref_index
 
-def create_mask(image, rect_top_left, rect_bottom_right, lower_color, upper_color):
+def create_mask(image, rect_left_top, rect_right_bottom, lower_color, upper_color):
     # 定义矩形区域的掩码
     if args.task == 'detext':
         rect_mask = np.zeros_like(image[:, :, 0])
-        cv2.rectangle(rect_mask, rect_top_left, rect_bottom_right, (255, 255, 255), thickness=cv2.FILLED)
+        cv2.rectangle(rect_mask, rect_left_top, rect_right_bottom, (255, 255, 255), thickness=cv2.FILLED)
         # 应用矩形区域的掩码
         frame_modified = cv2.bitwise_and(image, image, mask=rect_mask)
         # 创建掩码
@@ -80,16 +80,18 @@ def create_mask(image, rect_top_left, rect_bottom_right, lower_color, upper_colo
         kernel = np.ones((args.expand, args.expand), np.uint8)
         # 对掩码进行膨胀操作
         dilated_mask = cv2.dilate(mask, kernel, iterations=1)
+        if len(frame_modified[dilated_mask > 0]) == 0:
+            return None
         frame_modified[dilated_mask > 0] = [255, 255, 255]
         frame_modified[dilated_mask <= 0] = [0, 0, 0]
     else:
         rect_mask = np.zeros_like(image[:, :, 0])
-        cv2.rectangle(rect_mask, rect_top_left, rect_bottom_right, (255, 255, 255), thickness=cv2.FILLED)
+        cv2.rectangle(rect_mask, rect_left_top, rect_right_bottom, (255, 255, 255), thickness=cv2.FILLED)
         # 应用矩形区域的掩码
         frame_modified = cv2.bitwise_and(image, image, mask=rect_mask)
     return frame_modified
 #  read frames from video
-def read_frame_from_videos(npy_path, rect_top_left, rect_bottom_right):
+def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom):
     frame_index = 0
     vname = args.video
     frames = []
@@ -108,7 +110,7 @@ def read_frame_from_videos(npy_path, rect_top_left, rect_bottom_right):
         mask_path = Path(args.result) / f"{Path(args.video).stem}_{args.task}"
         if not mask_path.exists():
             mask_path.mkdir()
-    print(rect_top_left, rect_bottom_right, lower_color, upper_color)
+    print(rect_left_top, rect_right_bottom, lower_color, upper_color)
     if args.use_mp4:
         vidcap = cv2.VideoCapture(vname)
         success, image = vidcap.read()
@@ -123,24 +125,29 @@ def read_frame_from_videos(npy_path, rect_top_left, rect_bottom_right):
                 npy_file = npy_path / f'{frame_index}.npy'
                 np.save(str(npy_file), image)
             else:
-                frame_modified = create_mask(image, rect_top_left, rect_bottom_right, lower_color, upper_color)
-                mask = Image.fromarray(cv2.cvtColor(frame_modified, cv2.COLOR_BGR2RGB))
-                mask = np.array(mask.convert('L'))
-                mask = np.array(mask > 0).astype(np.uint8)
-                mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)), iterations=4)
-                masks.append(Image.fromarray(mask * 255))
-                if args.keep_mask:
-                    # 生成文件名，例如：00000.jpg
-                    mask_filename = mask_path / f"{frame_index:06d}.jpg"
-                    # 保存图像
-                    cv2.imwrite(str(mask_filename), frame_modified)
+                frame_modified = create_mask(image, rect_left_top, rect_right_bottom, lower_color, upper_color)
+                if frame_modified is None:
+                    npy_file = npy_path / f'{frame_index}.npy'
+                    np.save(str(npy_file), image)
+                    print('skip ', frame_index)
+                else:
+                    mask = Image.fromarray(cv2.cvtColor(frame_modified, cv2.COLOR_BGR2RGB))
+                    mask = np.array(mask.convert('L'))
+                    mask = np.array(mask > 0).astype(np.uint8)
+                    mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)), iterations=4)
+                    masks.append(Image.fromarray(mask * 255))
+                    if args.keep_mask:
+                        # 生成文件名，例如：00000.jpg
+                        mask_filename = mask_path / f"{frame_index:07d}.jpg"
+                        # 保存图像
+                        cv2.imwrite(str(mask_filename), frame_modified)
 
-                image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-                frames.append(image)
-                if len(frames) >= args.frame_stride:
-                    yield frames, masks
-                    frames = []
-                    masks = []
+                    image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                    frames.append(image)
+                    if len(frames) >= args.frame_stride:
+                        yield frames, masks
+                        frames = []
+                        masks = []
             success, image = vidcap.read()
             frame_index += 1
         vidcap.release()
@@ -160,24 +167,29 @@ def read_frame_from_videos(npy_path, rect_top_left, rect_bottom_right):
                 npy_file = npy_path / f'{frame_index}.npy'
                 np.save(str(npy_file), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
             else:
-                frame_modified = create_mask(image, rect_top_left, rect_bottom_right, lower_color, upper_color)
-                mask = Image.fromarray(cv2.cvtColor(frame_modified, cv2.COLOR_BGR2RGB))
-                mask = np.array(mask.convert('L'))
-                mask = np.array(mask > 0).astype(np.uint8)
-                mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)), iterations=4)
-                masks.append(Image.fromarray(mask * 255))
-                if args.keep_mask:
-                    # 生成文件名，例如：00000.jpg
-                    mask_filename = mask_path / f"{frame_index:06d}.jpg"
-                    # 保存图像
-                    cv2.imwrite(str(mask_filename), frame_modified)
+                frame_modified = create_mask(image, rect_left_top, rect_right_bottom, lower_color, upper_color)
+                if frame_modified is None:
+                    npy_file = npy_path / f'{frame_index}.npy'
+                    np.save(str(npy_file), image)
+                    print('skip ', frame_index)
+                else:
+                    mask = Image.fromarray(cv2.cvtColor(frame_modified, cv2.COLOR_BGR2RGB))
+                    mask = np.array(mask.convert('L'))
+                    mask = np.array(mask > 0).astype(np.uint8)
+                    mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)), iterations=4)
+                    masks.append(Image.fromarray(mask * 255))
+                    if args.keep_mask:
+                        # 生成文件名，例如：00000.jpg
+                        mask_filename = mask_path / f"{frame_index:07d}.jpg"
+                        # 保存图像
+                        cv2.imwrite(str(mask_filename), frame_modified)
 
-                image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-                frames.append(image)
-                if len(frames) >= args.frame_stride:
-                    yield frames, masks
-                    frames = []
-                    masks = []
+                    image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                    frames.append(image)
+                    if len(frames) >= args.frame_stride:
+                        yield frames, masks
+                        frames = []
+                        masks = []
             frame_index += 1
     if len(frames) > 0:
         yield frames, masks
@@ -238,8 +250,8 @@ def main_worker():
     left = max(0, args.box[2])
     right = min(width, args.box[3])
     # 矩形区域的左上角和右下角坐标
-    rect_top_left = (top, left)
-    rect_bottom_right = (bottom, right)
+    rect_left_top = (left, top)
+    rect_right_bottom = (right, bottom)
 
     video_path = str(Path(args.result) / f"{Path(args.video).stem}_{args.task}.mp4")
     writer = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*"mp4v"), default_fps, size)
@@ -251,7 +263,7 @@ def main_worker():
     npy_path = Path(args.result) / f"{Path(args.video).stem}_npy"
     if not npy_path.exists():
         npy_path.mkdir()
-    generator = read_frame_from_videos(npy_path, rect_top_left, rect_bottom_right)
+    generator = read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom)
     frame_index = 0
     while True:
         if next_x_frames is not None:
@@ -282,29 +294,13 @@ def main_worker():
         print(f'Start test...')
         stride_length = len(x_frames)
 
-        #strides = len(x_frames)
-
-        #print(strides)
-        #print(stride_length)
-
-        #loopstartframe = 0
-        #loopendframe = stride_length
-
-        #xfram = x_frames[itern]
-        #xmask = x_masks[itern]
         xfram = x_frames.copy()
         xmask = x_masks.copy()
 
-        #if (itern < strides - 1):
         if next_x_frames is not None:
-            for xframeppend in range(0, neighbor_stride):
+            for xframeppend in range(0, min(len(next_x_frames), neighbor_stride)):
                 xfram.append(next_x_frames[xframeppend])
                 xmask.append(next_x_masks[xframeppend])
-
-        # if (itern > 0):
-        #     for xframeppend in range(1, neighbor_stride + 1):
-        #         xfram.insert(0, x_frames[itern - 1][len(x_frames[itern - 1]) - xframeppend])
-        #         xmask.insert(0, x_masks[itern - 1][len(x_masks[itern - 1]) - xframeppend])
 
         imgs = to_tensors()(xfram).unsqueeze(0) * 2 - 1
         frames = [np.array(f).astype(np.uint8) for f in xfram]
@@ -317,13 +313,13 @@ def main_worker():
 
         #if itern > 0:
         if last_comp_frames is not None:
-            loopstartframe = neighbor_stride
+            loopstartframe = len(last_comp_frames)
         else:
             loopstartframe = 0
 
         #if (itern < strides - 1):
         if next_x_frames is not None:
-            loopendframe = stride_length + neighbor_stride
+            loopendframe = stride_length + min(len(next_x_frames), neighbor_stride)
         else:
             loopendframe = stride_length
 
@@ -369,7 +365,7 @@ def main_worker():
                     else:
                         comp_frames[idx] = comp_frames[idx].astype(np.float32) * 0.5 + img.astype(np.float32) * 0.5
         # saving videos
-        video_length = (len(comp_frames)-neighbor_stride) if next_x_frames is not None else len(comp_frames)
+        video_length = len(comp_frames) - neighbor_stride
         print('Saving videos...', video_length)
         for f in range(video_length):
             if comp_frames[f] is None:
@@ -379,12 +375,10 @@ def main_worker():
                 frame = np.load(str(npy_file))
                 writer.write(frame)
                 npy_file.unlink()
-                #print('-'*20, frame_index)
                 frame_index += 1
                 npy_file = npy_path / f'{frame_index}.npy'
             comp = comp_frames[f].astype(np.uint8)
             writer.write(cv2.cvtColor(comp, cv2.COLOR_BGR2RGB))
-            #print('-'*20, frame_index)
             frame_index += 1
     writer.release()
     out_path = str(Path(args.result) / f"{Path(args.video).stem}_out.mp4")
@@ -398,7 +392,7 @@ def main_worker():
         subprocess.call(command, shell=True)
     else:
         os.rename(video_path, out_path)
-    print(f'Finish test! The result video is saved in: {out_path}.')
+    print(f'Finish test! The result video is saved in: {out_path}.', frame_index)
 
 
 if __name__ == '__main__':
