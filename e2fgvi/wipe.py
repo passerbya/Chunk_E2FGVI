@@ -380,6 +380,14 @@ def main_worker():
             comp = comp_frames[f].astype(np.uint8)
             writer.write(cv2.cvtColor(comp, cv2.COLOR_BGR2RGB))
             frame_index += 1
+
+    npy_file = npy_path / f'{frame_index}.npy'
+    while npy_file.exists():
+        frame = np.load(str(npy_file))
+        writer.write(frame)
+        npy_file.unlink()
+        frame_index += 1
+        npy_file = npy_path / f'{frame_index}.npy'
     writer.release()
     out_path = str(Path(args.result) / f"{Path(args.video).stem}_out.mp4")
     if check_file_has_audio(args.video):
