@@ -81,19 +81,29 @@ def read_mask(mpath, size, frame_stride):
 
 
 #  read frames from video
-def read_frame_from_videos(args):
+def read_frame_from_videos(mpath, npy_path):
+    frame_index = 0
     vname = args.video
     frames = []
     if args.use_mp4:
         vidcap = cv2.VideoCapture(vname)
         success, image = vidcap.read()
         while success:
-            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            frames.append(image)
+            pic_path = Path(mpath) / f"{frame_index:05d}.jpg"
+            mask = cv2.imread(str(pic_path))
+            gray_mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+            if np.all(gray_mask == 0):
+                npy_file = npy_path / f'{frame_index}.npy'
+                np.save(str(npy_file), image)
+                print('skip ', frame_index)
+            else:
+                image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                frames.append(image)
+                if len(frames) >= args.frame_stride:
+                    yield frames
+                    frames = []
             success, image = vidcap.read()
-            if len(frames) >= args.frame_stride:
-                yield frames
-                frames = []
+            frame_index += 1
         vidcap.release()
     else:
         lst = os.listdir(vname)
@@ -101,14 +111,22 @@ def read_frame_from_videos(args):
         fr_lst = [vname + '/' + name for name in lst]
         for fr in fr_lst:
             image = cv2.imread(fr)
-            image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-            frames.append(image)
-            if len(frames) >= args.frame_stride:
-                yield frames
-                frames = []
+            pic_path = Path(mpath) / f"{frame_index:05d}.jpg"
+            mask = cv2.imread(str(pic_path))
+            gray_mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+            if np.all(gray_mask == 0):
+                npy_file = npy_path / f'{frame_index}.npy'
+                np.save(str(npy_file), image)
+                print('skip ', frame_index)
+            else:
+                image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                frames.append(image)
+                if len(frames) >= args.frame_stride:
+                    yield frames
+                    frames = []
+            frame_index += 1
     if len(frames) > 0:
         yield frames
-
 
 # resize frames
 def resize_frames(frames, size=None):
@@ -167,9 +185,12 @@ def main_worker():
     next_x_masks = None
     last_comp_frames = None
     framestride = args.frame_stride
-    rframes = read_frame_from_videos(args)
+    npy_path = Path('results') / f"{Path(args.video).stem}_npy"
+    if not npy_path.exists():
+        npy_path.mkdir()
+    rframes = read_frame_from_videos(args.mask, npy_path)
     rmasks = read_mask(args.mask, size, framestride)
-    ii = 0
+    frame_index = 0
     while True:
         if next_x_frames is not None:
             x_frames = next_x_frames
@@ -291,13 +312,28 @@ def main_worker():
                         comp_frames[idx] = comp_frames[idx].astype(np.float32) * 0.5 + img.astype(np.float32) * 0.5
         # saving videos
         video_length = len(comp_frames) - neighbor_stride
-        ii += video_length
-        print('Saving videos...', video_length, ii)
+        print('Saving videos...', video_length)
         for f in range(video_length):
             if comp_frames[f] is None:
                 continue
+            npy_file = npy_path / f'{frame_index}.npy'
+            while npy_file.exists():
+                frame = np.load(str(npy_file))
+                writer.write(frame)
+                npy_file.unlink()
+                frame_index += 1
+                npy_file = npy_path / f'{frame_index}.npy'
             comp = comp_frames[f].astype(np.uint8)
             writer.write(cv2.cvtColor(comp, cv2.COLOR_BGR2RGB))
+            frame_index += 1
+
+    npy_file = npy_path / f'{frame_index}.npy'
+    while npy_file.exists():
+        frame = np.load(str(npy_file))
+        writer.write(frame)
+        npy_file.unlink()
+        frame_index += 1
+        npy_file = npy_path / f'{frame_index}.npy'
     writer.release()
     out_path = str(Path('results') / f"{Path(args.video).stem}_out.mp4")
     if check_file_has_audio(args.video):
