@@ -103,6 +103,7 @@ def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom):
     if args.color_ranges is None:
         lower_color = None
         upper_color = None
+        args.task = 'delogo'
     else:
         lower_color = np.array([int(i) for i in args.color_ranges[0].split('_')])
         upper_color = np.array([int(i)+1 for i in args.color_ranges[1].split('_')])
@@ -110,7 +111,6 @@ def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom):
         mask_path = Path(args.result) / f"{Path(args.video).stem}_{args.task}"
         if not mask_path.exists():
             mask_path.mkdir()
-    print(rect_left_top, rect_right_bottom, lower_color, upper_color)
     if args.use_mp4:
         vidcap = cv2.VideoCapture(vname)
         success, image = vidcap.read()
@@ -265,6 +265,10 @@ def main_worker():
         npy_path.mkdir()
     generator = read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom)
     frame_index = 0
+    crop_top = max(0, args.box[0]-20)
+    crop_bottom = min(height, args.box[1]+20)
+    crop_left = max(0, args.box[2]-20)
+    crop_right = min(width, args.box[3]+20)
     while True:
         if next_x_frames is not None:
             x_frames = next_x_frames
@@ -289,7 +293,7 @@ def main_worker():
         x_frames, size = resize_frames(x_frames, size)
         if next_x_frames is not None:
             next_x_frames, _ = resize_frames(next_x_frames, size)
-        h, w = size[1], size[0]
+        #h, w = size[1], size[0]
 
         print(f'Start test...')
         stride_length = len(x_frames)
@@ -302,13 +306,16 @@ def main_worker():
                 xfram.append(next_x_frames[xframeppend])
                 xmask.append(next_x_masks[xframeppend])
 
-        imgs = to_tensors()(xfram).unsqueeze(0) * 2 - 1
-        frames = [np.array(f).astype(np.uint8) for f in xfram]
+        _xfram = [xf.crop((crop_left, crop_top, crop_right, crop_bottom)) for xf in xfram]
+        _xmask = [xm.crop((crop_left, crop_top, crop_right, crop_bottom)) for xm in xmask]
+        w, h = _xfram[0].size
+        imgs = to_tensors()(_xfram).unsqueeze(0) * 2 - 1
+        frames = [np.array(f).astype(np.uint8) for f in _xfram]
 
         binary_masks = [
-            np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in xmask
+            np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in _xmask
         ]
-        masks = to_tensors()(xmask).unsqueeze(0)
+        masks = to_tensors()(_xmask).unsqueeze(0)
         imgs, masks = imgs.half().to(device), masks.half().to(device)
 
         #if itern > 0:
@@ -360,10 +367,13 @@ def main_worker():
                     img = np.array(pred_imgs[i]).astype(
                         np.uint8) * binary_masks[idx] + frames[idx] * (
                                   1 - binary_masks[idx])
+                    xf = np.array(xfram[idx].convert("RGB"))
+                    xf[crop_top:crop_bottom, crop_left:crop_right] = img
+                    #cv2.imwrite(str(npy_path / f'{frame_index}.jpg'), xf)
                     if comp_frames[idx] is None:
-                        comp_frames[idx] = img
+                        comp_frames[idx] = xf
                     else:
-                        comp_frames[idx] = comp_frames[idx].astype(np.float32) * 0.5 + img.astype(np.float32) * 0.5
+                        comp_frames[idx] = comp_frames[idx].astype(np.float32) * 0.5 + xf.astype(np.float32) * 0.5
         # saving videos
         video_length = len(comp_frames) - neighbor_stride
         print('Saving videos...', video_length)
