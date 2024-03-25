@@ -295,7 +295,7 @@ def main_worker():
             next_x_frames, _ = resize_frames(next_x_frames, size)
         #h, w = size[1], size[0]
 
-        print(f'Start test...')
+        print(f'Start wipe...')
         stride_length = len(x_frames)
 
         xfram = x_frames.copy()
@@ -410,7 +410,7 @@ def main_worker():
         subprocess.call(command, shell=True)
     else:
         os.rename(video_path, out_path)
-    print(f'Finish test! The result video is saved in: {out_path}.', frame_index)
+    print(f'Finish wipe! The result video is saved in: {out_path}.', frame_index)
 
 
 if __name__ == '__main__':
