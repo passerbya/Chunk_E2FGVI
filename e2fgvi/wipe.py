@@ -18,13 +18,13 @@ parser = argparse.ArgumentParser(description="E2FGVI")
 parser.add_argument("-v", "--video", type=str, required=True)
 parser.add_argument("-c", "--ckpt", type=str, required=True)
 parser.add_argument("--model", type=str, choices=['e2fgvi', 'e2fgvi_hq'])
-parser.add_argument("--step", type=int, default=10)
+parser.add_argument("--step", type=int, default=5)
 parser.add_argument("--num_ref", type=int, default=-1)
-parser.add_argument("--neighbor_stride", type=int, default=10)
+parser.add_argument("--neighbor_stride", type=int, default=5)
 parser.add_argument("--savefps", type=int, default=24)
 
 # frame_stride must be evenly divisible by neighbor_stride
-parser.add_argument("--frame_stride", type=int, default=40)
+parser.add_argument("--frame_stride", type=int, default=25)
 
 
 # args for e2fgvi_hq (which can handle videos with arbitrary resolution)
