@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
+import json
+import shutil
+
+import sys
 import cv2
+import re
 from PIL import Image
 import numpy as np
 import importlib
@@ -8,6 +13,8 @@ import argparse
 from tqdm import tqdm
 import torch
 import subprocess
+import langid
+import hashlib
 
 from pathlib import Path
 from .core.utils import to_tensors
@@ -41,6 +48,9 @@ parser.add_argument( "--color_ranges", nargs='+', type=str,
 parser.add_argument("-r", "--result",  type=str, default='result/')
 parser.add_argument("-t", "--task", type=str, help='CHOOSE THE TASK：delogo or detext', default='detext')
 parser.add_argument("--keep_mask", action='store_true', default=False)
+parser.add_argument("--sub_file", type=str)
+parser.add_argument("--sub_offset", type=float, default=0.0)
+parser.add_argument("--hard_codes", nargs='+', type=str, default='【硬】')
 
 args = parser.parse_args()
 
@@ -49,6 +59,11 @@ num_ref = args.num_ref
 neighbor_stride = args.neighbor_stride
 default_fps = args.savefps
 
+def md5sum(s):
+    m = hashlib.md5()
+    m.update(s.encode('utf-8'))
+
+    return m.hexdigest()
 
 # sample reference frames from the whole video
 def get_ref_index(f, neighbor_ids, length):
@@ -67,11 +82,12 @@ def get_ref_index(f, neighbor_ids, length):
                 ref_index.append(i)
     return ref_index
 
-def create_mask(image, rect_left_top, rect_right_bottom, lower_color, upper_color):
+def create_mask(image, rect, lower_color, upper_color):
     # 定义矩形区域的掩码
     if args.task == 'detext':
         rect_mask = np.zeros_like(image[:, :, 0])
-        cv2.rectangle(rect_mask, rect_left_top, rect_right_bottom, (255, 255, 255), thickness=cv2.FILLED)
+        for rect_left_top, rect_right_bottom in rect:
+            cv2.rectangle(rect_mask, rect_left_top, rect_right_bottom, (255, 255, 255), thickness=cv2.FILLED)
         # 应用矩形区域的掩码
         frame_modified = cv2.bitwise_and(image, image, mask=rect_mask)
         # 创建掩码
@@ -86,12 +102,13 @@ def create_mask(image, rect_left_top, rect_right_bottom, lower_color, upper_colo
         frame_modified[dilated_mask <= 0] = [0, 0, 0]
     else:
         rect_mask = np.zeros_like(image[:, :, 0])
-        cv2.rectangle(rect_mask, rect_left_top, rect_right_bottom, (255, 255, 255), thickness=cv2.FILLED)
+        for rect_left_top, rect_right_bottom in rect:
+            cv2.rectangle(rect_mask, rect_left_top, rect_right_bottom, (255, 255, 255), thickness=cv2.FILLED)
         # 应用矩形区域的掩码
         frame_modified = cv2.bitwise_and(image, image, mask=rect_mask)
     return frame_modified
 #  read frames from video
-def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom):
+def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom, frame_indexes):
     frame_index = 0
     vname = args.video
     frames = []
@@ -111,21 +128,33 @@ def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom):
         mask_path = Path(args.result) / f"{Path(args.video).stem}_{args.task}"
         if not mask_path.exists():
             mask_path.mkdir()
+
     if args.use_mp4:
         vidcap = cv2.VideoCapture(vname)
         success, image = vidcap.read()
         while success:
             msec = frame_index * 1000 / default_fps
             is_excluded = False
-            for r in ranges:
-                if r[0] <= msec <= r[1]:
-                    is_excluded = True
-                    break
+            if len(frame_indexes) > 0:
+                is_excluded = frame_index not in frame_indexes
+            else:
+                for r in ranges:
+                    if r[0] <= msec <= r[1]:
+                        is_excluded = True
+                        break
             if is_excluded:
                 npy_file = npy_path / f'{frame_index}.npy'
                 np.save(str(npy_file), image)
             else:
-                frame_modified = create_mask(image, rect_left_top, rect_right_bottom, lower_color, upper_color)
+                if frame_index in frame_indexes and len(frame_indexes[frame_index]) > 0:
+                    rect = []
+                    for box in frame_indexes[frame_index]:
+                        _rect_left_top = (box[0], box[1])
+                        _rect_right_bottom = (box[2], box[3])
+                        rect.append((_rect_left_top, _rect_right_bottom))
+                else:
+                    rect = [(rect_left_top, rect_right_bottom)]
+                frame_modified = create_mask(image, rect, lower_color, upper_color)
                 if frame_modified is None:
                     npy_file = npy_path / f'{frame_index}.npy'
                     np.save(str(npy_file), image)
@@ -135,7 +164,7 @@ def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom):
                     mask = np.array(mask.convert('L'))
                     mask = np.array(mask > 0).astype(np.uint8)
                     mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)), iterations=4)
-                    masks.append(Image.fromarray(mask * 255))
+                    masks.append((Image.fromarray(mask * 255), rect))
                     if args.keep_mask:
                         # 生成文件名，例如：00000.jpg
                         mask_filename = mask_path / f"{frame_index:07d}.jpg"
@@ -167,7 +196,8 @@ def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom):
                 npy_file = npy_path / f'{frame_index}.npy'
                 np.save(str(npy_file), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
             else:
-                frame_modified = create_mask(image, rect_left_top, rect_right_bottom, lower_color, upper_color)
+                rect = [(rect_left_top, rect_right_bottom)]
+                frame_modified = create_mask(image, rect, lower_color, upper_color)
                 if frame_modified is None:
                     npy_file = npy_path / f'{frame_index}.npy'
                     np.save(str(npy_file), image)
@@ -177,7 +207,7 @@ def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom):
                     mask = np.array(mask.convert('L'))
                     mask = np.array(mask > 0).astype(np.uint8)
                     mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)), iterations=4)
-                    masks.append(Image.fromarray(mask * 255))
+                    masks.append((Image.fromarray(mask * 255), rect))
                     if args.keep_mask:
                         # 生成文件名，例如：00000.jpg
                         mask_filename = mask_path / f"{frame_index:07d}.jpg"
@@ -253,6 +283,189 @@ def main_worker():
     rect_left_top = (left, top)
     rect_right_bottom = (right, bottom)
 
+    frame_indexes = {}
+    need_check_hard_subs = []
+    sub_from_json = []
+    if args.sub_file and os.path.exists(args.sub_file):
+        script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+        with open(args.sub_file, 'r', encoding='utf-8') as file:
+            sorted_subs = json.load(file)
+        sub_from_json = sorted_subs.copy()
+        sub_offset = int(args.sub_offset*100)
+        sorted_subs.sort(key=lambda x:(x['st'], x['et']))
+        sub_end = sorted_subs[-1]['et']
+        for i1, sub in enumerate(sorted_subs):
+            st1 = sub['st']
+            et1 = sub['et']
+            if i1 < len(sorted_subs)-1:
+                st2 = sorted_subs[i1+1]['st']
+                offset = sub_offset
+                if et1 < st2:
+                    #前后两条字幕不重叠
+                    while offset>0 and et1+offset>st2-offset:
+                        #原本不重叠扩大时间轴后保持不重叠
+                        offset -= 1
+                elif et1 == st2:
+                    offset = 0
+                sub['st'] = (st1-offset) if (st1-offset)>0 else 0
+                sub['et'] = (et1+offset) if (et1+offset)<sub_end else sub_end
+            else:
+                #最后一条结束时间不扩大
+                sub['st'] = st1 - sub_offset
+        sorted_subs.sort(key=lambda x:(x['st'], x['et']))
+        timestamps = []
+        all_sub_txt = ''
+        sep = ''
+        for sub in sorted_subs:
+            timestamps.append(sub['st'])
+            timestamps.append(sub['et'])
+            txt = sub['txt']
+            txt = re.sub('[\r\n]+', ' ', txt)
+            sub['txt'] = txt
+            for hard_code in args.hard_codes:
+                if txt.startswith(hard_code):
+                    txt = txt[len(hard_code):]
+            all_sub_txt += sep + txt
+            sep = ' '
+        lang = langid.classify(all_sub_txt)[0]
+        print(lang)
+
+        timestamps = list(set(timestamps))
+        timestamps.sort()
+        times_len = len(timestamps)
+        subs = []
+        for i in range(times_len-1):
+            st = timestamps[i]
+            et = timestamps[i+1]
+            children = []
+            sub = {'st':st,'et':et,'subs':children}
+            is_all_not_wipe = True
+            for sub1 in sorted_subs:
+                st1 = sub1['st']
+                et1 = sub1['et']
+                txt1 = sub1['txt']
+                is_hard_sub = False
+                for hard_code in args.hard_codes:
+                    if txt1.startswith(hard_code):
+                        txt1 = txt1[len(hard_code):]
+                        is_hard_sub = True
+                wipe1 = sub1['wipe'] if 'wipe' in sub1 else 1
+                if st1 <= st and et1 >= et:
+                    if wipe1 == 1:
+                        is_all_not_wipe = False
+                    children.append({'txt':txt1,'wipe':wipe1,'is_hard_sub':is_hard_sub})
+            if not is_all_not_wipe:
+                subs.append(sub)
+
+        frame_index = 0
+        vidcap = cv2.VideoCapture(args.video)
+        for sub in subs:
+            st = sub['st']
+            et = sub['et']
+            has_hard_sub = False
+            all_sub_txt = ''
+            sep = ''
+            for child in sub['subs']:
+                txt = child['txt']
+                if child['is_hard_sub']:
+                    has_hard_sub = True
+                elif child['wipe'] == 1:
+                    all_sub_txt += sep + txt
+                    sep = ' '
+
+            frame_dir = Path(args.result) / f"{st}_{et}/"
+            if not frame_dir.exists():
+                frame_dir.mkdir()
+            while True:
+                success, frame = vidcap.read()
+                if not success:
+                    break
+                msec = frame_index * 1000 / default_fps
+                if msec < st:
+                    frame_index += 1
+                    continue
+                if  msec < et:
+                    frame_indexes[frame_index] = []
+                    if has_hard_sub:
+                        #print(str(frame_dir / f'{frame_index}.jpg'))
+                        cv2.imwrite(str(frame_dir / f'{frame_index}.jpg'), frame)
+                frame_index += 1
+                if ((frame_index+1) * 1000 / default_fps) >= et:
+                    break
+            if has_hard_sub:
+                keep_hard_sub = False
+                for child in sub['subs']:
+                    txt = child['txt']
+                    if not child['is_hard_sub']:
+                        continue
+                    content_md5 = md5sum(txt)
+                    txt = txt.replace("'", "\'")
+                    if child['wipe'] == 1:
+                        if lang in ('bn','th'):
+                            cmd = f"source /etc/profile_easyocr && python3 {str(script_dir/'ocr_easyocr.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{txt}'"
+                        else:
+                            cmd = f"source /etc/profile_paddle && python3 {str(script_dir/'ocr_paddle.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{txt}'"
+                        print(cmd)
+                        subprocess.check_output(cmd, shell=True).decode('utf-8', 'ignore')
+                        with open(str(Path(frame_dir) / f'{content_md5}_box.json'), 'r', encoding='utf-8') as file:
+                            child['boxes'] = json.load(file)
+                    else:
+                        keep_hard_sub = True
+
+                img_stems = []
+                for img in frame_dir.glob("*.jpg"):
+                    img_stems.append(int(img.stem))
+                img_stems.sort()
+                if keep_hard_sub:
+                    content_md5 = md5sum(all_sub_txt)
+                    all_sub_txt = all_sub_txt.replace("'", "\'")
+                    if lang in ('bn','th'):
+                        cmd = f"source /etc/profile_easyocr && python3 {str(script_dir/'ocr_easyocr.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{all_sub_txt}'"
+                    else:
+                        cmd = f"source /etc/profile_paddle && python3 {str(script_dir/'ocr_paddle.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{all_sub_txt}'"
+                    print(cmd)
+                    subprocess.check_output(cmd, shell=True).decode('utf-8', 'ignore')
+                    with open(str(Path(frame_dir) / f'{content_md5}_box.json'), 'r', encoding='utf-8') as file:
+                        boxes = json.load(file)
+                    for i1, img_stem in enumerate(img_stems):
+                        box = boxes[i1]
+                        if box[0] > 0.8:
+                            frame_indexes[img_stem] = [box[1]]
+                        else:
+                            if (boxes[-1][0] == 0 and boxes[-1][1] == 0) or (boxes[-1][2] == 0 and boxes[-1][3] == 0):
+                                frame_indexes[img_stem] = [(left, top, right, bottom)]
+                            else:
+                                frame_indexes[img_stem] = [boxes[-1][1]]
+                        print(box[0], frame_indexes[img_stem])
+                else:
+                    for img_stem in img_stems:
+                        frame_indexes[img_stem] = [(left, top, right, bottom)]
+
+                for child in sub['subs']:
+                    if 'boxes' not in child:
+                        continue
+                    boxes = child['boxes']
+                    print(len(img_stems), len(boxes))
+                    need_check = False
+                    for i1, img_stem in enumerate(img_stems):
+                        box = boxes[i1]
+                        if box[0] > 0.8:
+                            box = box[1]
+                        else:
+                            box = boxes[-1][1]
+                        #print(img_stem, frame_indexes[img_stem], boxes[i1][0], box)
+                        if (box[0] == 0 and box[1] == 0) or (box[2] == 0 and box[3] == 0):
+                            continue
+                        frame_indexes[img_stem].append(box)
+                        box.append(f"{st}_{et}")
+                        need_check = True
+                    if need_check:
+                        need_check_hard_subs.append({'st':st,'et':et,'txt':child['txt']})
+            else:
+                for img_stem in img_stems:
+                    frame_indexes[img_stem] = [(left, top, right, bottom)]
+
+        vidcap.release()
     video_path = str(Path(args.result) / f"{Path(args.video).stem}_{args.task}.mp4")
     writer = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*"mp4v"), default_fps, size)
 
@@ -263,7 +476,17 @@ def main_worker():
     npy_path = Path(args.result) / f"{Path(args.video).stem}_npy"
     if not npy_path.exists():
         npy_path.mkdir()
-    generator = read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom)
+    hard_sub_path = Path(args.result) / f"{Path(args.video).stem}_hard_sub"
+    if not hard_sub_path.exists():
+        hard_sub_path.mkdir()
+    else:
+        for f in hard_sub_path.glob("*"):
+            if f.is_dir():
+                shutil.rmtree(str(f))
+            else:
+                os.remove(str(f))
+
+    generator = read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom, frame_indexes)
     frame_index = 0
     crop_top = max(0, args.box[0]-20)
     crop_bottom = min(height, args.box[1]+20)
@@ -306,8 +529,20 @@ def main_worker():
                 xfram.append(next_x_frames[xframeppend])
                 xmask.append(next_x_masks[xframeppend])
 
-        _xfram = [xf.crop((crop_left, crop_top, crop_right, crop_bottom)) for xf in xfram]
-        _xmask = [xm.crop((crop_left, crop_top, crop_right, crop_bottom)) for xm in xmask]
+        _crop_left = crop_left
+        _crop_top = crop_top
+        _crop_right = crop_right
+        _crop_bottom = crop_bottom
+        for xm in xmask:
+            for mask_left_top, mask_right_bottom in xm[1]:
+                _crop_left = min(_crop_left, mask_left_top[0])
+                _crop_top = min(_crop_top, mask_left_top[1])
+                _crop_right = max(_crop_right, mask_right_bottom[0])
+                _crop_bottom = max(_crop_bottom, mask_right_bottom[1])
+        print((crop_left, crop_top, crop_right, crop_bottom), (_crop_left, _crop_top, _crop_right, _crop_bottom))
+
+        _xfram = [xf.crop((_crop_left, _crop_top, _crop_right, _crop_bottom)) for xf in xfram]
+        _xmask = [xm[0].crop((_crop_left, _crop_top, _crop_right, _crop_bottom)) for xm in xmask]
         w, h = _xfram[0].size
         imgs = to_tensors()(_xfram).unsqueeze(0) * 2 - 1
         frames = [np.array(f).astype(np.uint8) for f in _xfram]
@@ -368,12 +603,24 @@ def main_worker():
                         np.uint8) * binary_masks[idx] + frames[idx] * (
                                   1 - binary_masks[idx])
                     xf = np.array(xfram[idx].convert("RGB"))
-                    xf[crop_top:crop_bottom, crop_left:crop_right] = img
-                    #cv2.imwrite(str(npy_path / f'{frame_index}.jpg'), xf)
+                    xf[_crop_top:_crop_bottom, _crop_left:_crop_right] = img
                     if comp_frames[idx] is None:
                         comp_frames[idx] = xf
                     else:
                         comp_frames[idx] = comp_frames[idx].astype(np.float32) * 0.5 + xf.astype(np.float32) * 0.5
+
+                    f_index = frame_index
+                    for i1 in range(len(comp_frames) - neighbor_stride):
+                        if comp_frames[i1] is None:
+                            continue
+                        if i1 == idx:
+                            break
+                        f_index += 1
+                    if f_index in frame_indexes:
+                        hard_sub_dir = hard_sub_path / frame_indexes[f_index][-1][-1]
+                        if not hard_sub_dir.exists():
+                            hard_sub_dir.mkdir()
+                        cv2.imwrite(str(hard_sub_dir / f'{f_index}.jpg'), comp_frames[idx])
         # saving videos
         video_length = len(comp_frames) - neighbor_stride
         print('Saving videos...', video_length)
@@ -399,6 +646,31 @@ def main_worker():
         frame_index += 1
         npy_file = npy_path / f'{frame_index}.npy'
     writer.release()
+
+    need_check_indexes = []
+    for sub in need_check_hard_subs:
+        st = sub['st']
+        et = sub['et']
+        txt = sub['txt']
+        frame_dir = hard_sub_path / f"{st}_{et}/"
+        content_md5 = md5sum(txt)
+        txt = txt.replace("'", "\'")
+        if lang in ('bn','th'):
+            cmd = f"source /etc/profile_easyocr && python3 {str(script_dir/'ocr_easyocr.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{txt}'"
+        else:
+            cmd = f"source /etc/profile_paddle && python3 {str(script_dir/'ocr_paddle.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{txt}'"
+        print(cmd)
+        subprocess.check_output(cmd, shell=True).decode('utf-8', 'ignore')
+        with open(str(Path(frame_dir) / f'{content_md5}_box.json'), 'r', encoding='utf-8') as file:
+            boxes = json.load(file)
+        if len(boxes[:-1][0>0.5]) > 0:
+            print(sub)
+            for index, subd in enumerate(sub_from_json):
+                if max(st, subd['st']) < min(et, subd['et']):
+                    need_check_indexes.append(index)
+
+    with open(str(Path(args.result) / f"{Path(args.video).stem}_check.json"), 'w', encoding='utf-8') as file:
+        json.dump(need_check_indexes, file)
     out_path = str(Path(args.result) / f"{Path(args.video).stem}_out.mp4")
     if check_file_has_audio(args.video):
         analysis_cmd = '%s -v quiet -of default=nokey=1:noprint_wrappers=1 -select_streams a -show_entries stream=bit_rate -i "%s"' % (ffprobeExe, args.video)

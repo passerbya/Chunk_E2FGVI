@@ -9,3 +9,4 @@ moviepy
 tensorboard
 matplotlib
 opencv-python
+langid
