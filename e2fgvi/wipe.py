@@ -284,19 +284,29 @@ def main_worker():
     rect_right_bottom = (right, bottom)
 
     frame_indexes = {}
-    need_check_hard_subs = []
+    need_check_hard_subs = {}
     sub_from_json = []
     if args.sub_file and os.path.exists(args.sub_file):
         script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
         with open(args.sub_file, 'r', encoding='utf-8') as file:
             sorted_subs = json.load(file)
         sub_from_json = sorted_subs.copy()
-        sub_offset = int(args.sub_offset*100)
+        sub_offset = int(args.sub_offset*1000)
         sorted_subs.sort(key=lambda x:(x['st'], x['et']))
         sub_end = sorted_subs[-1]['et']
         for i1, sub in enumerate(sorted_subs):
             st1 = sub['st']
             et1 = sub['et']
+            if i1 > 1:
+                et0 = sorted_subs[i1-1]['et']
+                if et0 < st1:
+                    #前后两条字幕不重叠
+                    while offset>0 and et0+offset>st1-offset:
+                        #原本不重叠扩大时间轴后保持不重叠
+                        offset -= 1
+                elif et0 == st1:
+                    offset = 0
+                sub['st'] = (st1-offset) if (st1-offset)>0 else 0
             if i1 < len(sorted_subs)-1:
                 st2 = sorted_subs[i1+1]['st']
                 offset = sub_offset
@@ -307,11 +317,7 @@ def main_worker():
                         offset -= 1
                 elif et1 == st2:
                     offset = 0
-                sub['st'] = (st1-offset) if (st1-offset)>0 else 0
                 sub['et'] = (et1+offset) if (et1+offset)<sub_end else sub_end
-            else:
-                #最后一条结束时间不扩大
-                sub['st'] = st1 - sub_offset
         sorted_subs.sort(key=lambda x:(x['st'], x['et']))
         timestamps = []
         all_sub_txt = ''
@@ -354,6 +360,8 @@ def main_worker():
                     if wipe1 == 1:
                         is_all_not_wipe = False
                     children.append({'txt':txt1,'wipe':wipe1,'is_hard_sub':is_hard_sub})
+                if st1 > et:
+                    break
             if not is_all_not_wipe:
                 subs.append(sub)
 
@@ -387,7 +395,7 @@ def main_worker():
                 if  msec < et:
                     frame_indexes[frame_index] = []
                     if has_hard_sub:
-                        #print(str(frame_dir / f'{frame_index}.jpg'))
+                        print(st, msec, et, str(frame_dir / f'{frame_index}.jpg'))
                         cv2.imwrite(str(frame_dir / f'{frame_index}.jpg'), frame)
                 frame_index += 1
                 if ((frame_index+1) * 1000 / default_fps) >= et:
@@ -457,10 +465,9 @@ def main_worker():
                         if (box[0] == 0 and box[1] == 0) or (box[2] == 0 and box[3] == 0):
                             continue
                         frame_indexes[img_stem].append(box)
-                        box.append(f"{st}_{et}")
                         need_check = True
                     if need_check:
-                        need_check_hard_subs.append({'st':st,'et':et,'txt':child['txt']})
+                        need_check_hard_subs[img_stem] = {'st':st,'et':et,'txt':child['txt']}
             else:
                 for img_stem in img_stems:
                     frame_indexes[img_stem] = [(left, top, right, bottom)]
@@ -616,8 +623,10 @@ def main_worker():
                         if i1 == idx:
                             break
                         f_index += 1
-                    if f_index in frame_indexes:
-                        hard_sub_dir = hard_sub_path / frame_indexes[f_index][-1][-1]
+                    if f_index in need_check_hard_subs:
+                        st = need_check_hard_subs[f_index]['st']
+                        et = need_check_hard_subs[f_index]['et']
+                        hard_sub_dir = hard_sub_path / f"{st}_{et}/"
                         if not hard_sub_dir.exists():
                             hard_sub_dir.mkdir()
                         cv2.imwrite(str(hard_sub_dir / f'{f_index}.jpg'), comp_frames[idx])
@@ -648,7 +657,7 @@ def main_worker():
     writer.release()
 
     need_check_indexes = []
-    for sub in need_check_hard_subs:
+    for sub in need_check_hard_subs.values():
         st = sub['st']
         et = sub['et']
         txt = sub['txt']
@@ -669,6 +678,7 @@ def main_worker():
                 if max(st, subd['st']) < min(et, subd['et']):
                     need_check_indexes.append(index)
 
+    need_check_indexes.sort()
     with open(str(Path(args.result) / f"{Path(args.video).stem}_check.json"), 'w', encoding='utf-8') as file:
         json.dump(need_check_indexes, file)
     out_path = str(Path(args.result) / f"{Path(args.video).stem}_out.mp4")
