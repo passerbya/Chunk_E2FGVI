@@ -284,13 +284,10 @@ def main_worker():
     rect_right_bottom = (right, bottom)
 
     frame_indexes = {}
-    need_check_hard_subs = {}
-    sub_from_json = []
     if args.sub_file and os.path.exists(args.sub_file):
         script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
         with open(args.sub_file, 'r', encoding='utf-8') as file:
             sorted_subs = json.load(file)
-        sub_from_json = sorted_subs.copy()
         sub_offset = int(args.sub_offset*1000)
         sorted_subs.sort(key=lambda x:(x['st'], x['et']))
         sub_end = sorted_subs[-1]['et']
@@ -390,15 +387,16 @@ def main_worker():
                     break
                 msec = frame_index * 1000 / default_fps
                 if msec < st:
+                    #print('-'*20, st, msec, et, frame_index)
                     frame_index += 1
                     continue
+                #print(st, msec, et, frame_index, has_hard_sub)
                 if  msec < et:
                     frame_indexes[frame_index] = []
                     if has_hard_sub:
-                        print(st, msec, et, str(frame_dir / f'{frame_index}.jpg'))
                         cv2.imwrite(str(frame_dir / f'{frame_index}.jpg'), frame)
                 frame_index += 1
-                if ((frame_index+1) * 1000 / default_fps) >= et:
+                if (frame_index * 1000 / default_fps) >= et:
                     break
             if has_hard_sub:
                 keep_hard_sub = False
@@ -428,9 +426,9 @@ def main_worker():
                     content_md5 = md5sum(all_sub_txt)
                     all_sub_txt = all_sub_txt.replace("'", "\'")
                     if lang in ('bn','th'):
-                        cmd = f"source /etc/profile_easyocr && python3 {str(script_dir/'ocr_easyocr.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{all_sub_txt}'"
+                        cmd = f"source /etc/profile_easyocr && python3 {str(script_dir/'ocr_easyocr.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{all_sub_txt}' --box {top} {bottom} {left} {right}"
                     else:
-                        cmd = f"source /etc/profile_paddle && python3 {str(script_dir/'ocr_paddle.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{all_sub_txt}'"
+                        cmd = f"source /etc/profile_paddle && python3 {str(script_dir/'ocr_paddle.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{all_sub_txt}' --box {top} {bottom} {left} {right}"
                     print(cmd)
                     subprocess.check_output(cmd, shell=True).decode('utf-8', 'ignore')
                     with open(str(Path(frame_dir) / f'{content_md5}_box.json'), 'r', encoding='utf-8') as file:
@@ -440,11 +438,11 @@ def main_worker():
                         if box[0] > 0.8:
                             frame_indexes[img_stem] = [box[1]]
                         else:
-                            if (boxes[-1][0] == 0 and boxes[-1][1] == 0) or (boxes[-1][2] == 0 and boxes[-1][3] == 0):
+                            last_box = boxes[-1][1]
+                            if last_box == [0, 0, 0, 0]:
                                 frame_indexes[img_stem] = [(left, top, right, bottom)]
                             else:
                                 frame_indexes[img_stem] = [boxes[-1][1]]
-                        print(box[0], frame_indexes[img_stem])
                 else:
                     for img_stem in img_stems:
                         frame_indexes[img_stem] = [(left, top, right, bottom)]
@@ -453,21 +451,15 @@ def main_worker():
                     if 'boxes' not in child:
                         continue
                     boxes = child['boxes']
-                    print(len(img_stems), len(boxes))
-                    need_check = False
                     for i1, img_stem in enumerate(img_stems):
                         box = boxes[i1]
                         if box[0] > 0.8:
                             box = box[1]
                         else:
                             box = boxes[-1][1]
-                        #print(img_stem, frame_indexes[img_stem], boxes[i1][0], box)
                         if (box[0] == 0 and box[1] == 0) or (box[2] == 0 and box[3] == 0):
                             continue
                         frame_indexes[img_stem].append(box)
-                        need_check = True
-                    if need_check:
-                        need_check_hard_subs[img_stem] = {'st':st,'et':et,'txt':child['txt']}
             else:
                 for img_stem in img_stems:
                     frame_indexes[img_stem] = [(left, top, right, bottom)]
@@ -483,15 +475,6 @@ def main_worker():
     npy_path = Path(args.result) / f"{Path(args.video).stem}_npy"
     if not npy_path.exists():
         npy_path.mkdir()
-    hard_sub_path = Path(args.result) / f"{Path(args.video).stem}_hard_sub"
-    if not hard_sub_path.exists():
-        hard_sub_path.mkdir()
-    else:
-        for f in hard_sub_path.glob("*"):
-            if f.is_dir():
-                shutil.rmtree(str(f))
-            else:
-                os.remove(str(f))
 
     generator = read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom, frame_indexes)
     frame_index = 0
@@ -546,7 +529,7 @@ def main_worker():
                 _crop_top = min(_crop_top, mask_left_top[1])
                 _crop_right = max(_crop_right, mask_right_bottom[0])
                 _crop_bottom = max(_crop_bottom, mask_right_bottom[1])
-        print((crop_left, crop_top, crop_right, crop_bottom), (_crop_left, _crop_top, _crop_right, _crop_bottom))
+        #print((crop_left, crop_top, crop_right, crop_bottom), (_crop_left, _crop_top, _crop_right, _crop_bottom))
 
         _xfram = [xf.crop((_crop_left, _crop_top, _crop_right, _crop_bottom)) for xf in xfram]
         _xmask = [xm[0].crop((_crop_left, _crop_top, _crop_right, _crop_bottom)) for xm in xmask]
@@ -615,21 +598,6 @@ def main_worker():
                         comp_frames[idx] = xf
                     else:
                         comp_frames[idx] = comp_frames[idx].astype(np.float32) * 0.5 + xf.astype(np.float32) * 0.5
-
-                    f_index = frame_index
-                    for i1 in range(len(comp_frames) - neighbor_stride):
-                        if comp_frames[i1] is None:
-                            continue
-                        if i1 == idx:
-                            break
-                        f_index += 1
-                    if f_index in need_check_hard_subs:
-                        st = need_check_hard_subs[f_index]['st']
-                        et = need_check_hard_subs[f_index]['et']
-                        hard_sub_dir = hard_sub_path / f"{st}_{et}/"
-                        if not hard_sub_dir.exists():
-                            hard_sub_dir.mkdir()
-                        cv2.imwrite(str(hard_sub_dir / f'{f_index}.jpg'), comp_frames[idx])
         # saving videos
         video_length = len(comp_frames) - neighbor_stride
         print('Saving videos...', video_length)
@@ -644,7 +612,8 @@ def main_worker():
                 frame_index += 1
                 npy_file = npy_path / f'{frame_index}.npy'
             comp = comp_frames[f].astype(np.uint8)
-            writer.write(cv2.cvtColor(comp, cv2.COLOR_BGR2RGB))
+            comp = cv2.cvtColor(comp, cv2.COLOR_BGR2RGB)
+            writer.write(comp)
             frame_index += 1
 
     npy_file = npy_path / f'{frame_index}.npy'
@@ -656,31 +625,6 @@ def main_worker():
         npy_file = npy_path / f'{frame_index}.npy'
     writer.release()
 
-    need_check_indexes = []
-    for sub in need_check_hard_subs.values():
-        st = sub['st']
-        et = sub['et']
-        txt = sub['txt']
-        frame_dir = hard_sub_path / f"{st}_{et}/"
-        content_md5 = md5sum(txt)
-        txt = txt.replace("'", "\'")
-        if lang in ('bn','th'):
-            cmd = f"source /etc/profile_easyocr && python3 {str(script_dir/'ocr_easyocr.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{txt}'"
-        else:
-            cmd = f"source /etc/profile_paddle && python3 {str(script_dir/'ocr_paddle.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{txt}'"
-        print(cmd)
-        subprocess.check_output(cmd, shell=True).decode('utf-8', 'ignore')
-        with open(str(Path(frame_dir) / f'{content_md5}_box.json'), 'r', encoding='utf-8') as file:
-            boxes = json.load(file)
-        if len(boxes[:-1][0>0.5]) > 0:
-            print(sub)
-            for index, subd in enumerate(sub_from_json):
-                if max(st, subd['st']) < min(et, subd['et']):
-                    need_check_indexes.append(index)
-
-    need_check_indexes.sort()
-    with open(str(Path(args.result) / f"{Path(args.video).stem}_check.json"), 'w', encoding='utf-8') as file:
-        json.dump(need_check_indexes, file)
     out_path = str(Path(args.result) / f"{Path(args.video).stem}_out.mp4")
     if check_file_has_audio(args.video):
         analysis_cmd = '%s -v quiet -of default=nokey=1:noprint_wrappers=1 -select_streams a -show_entries stream=bit_rate -i "%s"' % (ffprobeExe, args.video)

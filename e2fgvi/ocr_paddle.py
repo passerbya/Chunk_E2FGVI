@@ -1,6 +1,5 @@
 #!/usr/bin/python
 # coding: utf-8
-
 import sys
 import os
 import re
@@ -8,6 +7,7 @@ import json
 import argparse
 import Levenshtein
 import hashlib
+import cv2
 from pathlib import Path
 import logging.handlers
 from paddleocr import PaddleOCR
@@ -27,7 +27,7 @@ def apply_similarity(s1, s2):
     m = max(len(s1), len(s2))
     return (m-distance)/m
 
-def recognize(lang, frame_dir, content):
+def recognize(lang, frame_dir, content, sub_box=None):
     os.environ["FLAGS_allocator_strategy"] = 'naive_best_fit'
     os.environ["FLAGS_fraction_of_gpu_memory_to_use"] = '0.01'
     os.environ["FLAGS_gpu_memory_limit_mb"] = '2048'
@@ -42,14 +42,28 @@ def recognize(lang, frame_dir, content):
     img_dir = Path(frame_dir)
     logger.info('开始识别%s %s', img_dir, lang)
     imgs = []
+    temp_file_path = None
+    if sub_box is not None and len(sub_box) > 0:
+        temp_file_path = img_dir / 'temp'
+        if not temp_file_path.exists():
+            temp_file_path.mkdir()
+    width = 0
     for img in img_dir.glob("*.jpg"):
+        if temp_file_path is not None:
+            image = cv2.imread(str(img))
+            img = temp_file_path / img.name
+            cv2.imwrite(str(img), image[sub_box[0]:sub_box[1], sub_box[2]:sub_box[3]])
+            width = sub_box[3] - sub_box[2]
+        else:
+            image = cv2.imread(str(img))
+            _, width = image.shape[:-1]
         imgs.append((int(img.stem), img))
     imgs.sort(key=lambda x:x[0])
     boxes = []
     for img in imgs:
         result_list = ocr.ocr(str(img[1]), cls=False)
         if len(result_list) == 0 or result_list[0] is None:
-            boxes.append((0, (0, 0, 0, 0)))
+            boxes.append((0, [0, 0, 0, 0]))
             continue
         result_list = result_list[0]
         #logger.info(result_list)
@@ -112,10 +126,13 @@ def recognize(lang, frame_dir, content):
                             top = w[1]
                         if w[1] > bottom:
                             bottom = w[1]
+                        offset = bottom - top
+                        left = (left - offset) if (left - offset)>0 else 0
+                        right = (right + offset) if (right + offset)<width else width
             logger.info('%s %s %s', s, (left, top, right, bottom), all_txt)
-            boxes.append((s, (int(left), int(top), int(right), int(bottom))))
+            boxes.append((s, [int(left), int(top), int(right), int(bottom)]))
         else:
-            boxes.append((0, (0, 0, 0, 0)))
+            boxes.append((0, [0, 0, 0, 0]))
 
     _boxes = []
     for box in boxes:
@@ -135,7 +152,15 @@ def recognize(lang, frame_dir, content):
                 top = box[1][1]
             if box[1][3] > bottom:
                 bottom = box[1][3]
-        boxes.append((1, (left, top, right, bottom)))
+        boxes.append((1, [left, top, right, bottom]))
+    if temp_file_path is not None:
+        for box in boxes:
+            if box[1] == [0, 0, 0, 0]:
+                continue
+            box[1][0] += sub_box[2]
+            box[1][2] += sub_box[2]
+            box[1][1] += sub_box[0]
+            box[1][3] += sub_box[0]
     with open(str(Path(frame_dir) / f'{md5sum(content)}_box.json'), 'w', encoding='utf-8') as file:
         json.dump(boxes, file)
     logger.info(len(boxes))
@@ -157,6 +182,8 @@ if __name__ == "__main__":
     parser.add_argument('--lang', type=str)
     parser.add_argument('--frame_dir', type=str)
     parser.add_argument('--content', type=str)
+    parser.add_argument("--box", nargs='+', type=int,
+                        help='Specify a mask box for the subtilte. Syntax: (top, bottom, left, right).')
     args = parser.parse_args()
     #参数转换
     _lang = args.lang
@@ -186,7 +213,7 @@ if __name__ == "__main__":
     elif args.lang in devanagari_lang_list:
         _lang = 'devanagari'
 
-    recognize(_lang, args.frame_dir, args.content)
+    recognize(_lang, args.frame_dir, args.content, args.box)
     '''
     recognize('en', '/usr/local/data/jtubespeech/0_1', 'to be continued')
     recognize('en', '/usr/local/data/jtubespeech/1_1', 'LOVING YOU IN SECRET 01')
