@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-import json
-import shutil
 
 import sys
 import cv2
@@ -15,6 +13,8 @@ import torch
 import subprocess
 import langid
 import hashlib
+import json
+import shutil
 
 from pathlib import Path
 from .core.utils import to_tensors
@@ -287,7 +287,17 @@ def main_worker():
     if args.sub_file and os.path.exists(args.sub_file):
         script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
         with open(args.sub_file, 'r', encoding='utf-8') as file:
-            sorted_subs = json.load(file)
+            load_subs = json.load(file)
+        sorted_subs = []
+        for sub1 in load_subs:
+            is_hard_sub = False
+            for hard_code in args.hard_codes:
+                if sub1['txt'].startswith(hard_code):
+                    is_hard_sub = True
+                    break
+            if is_hard_sub and 'wipe' not in sub1:
+                continue
+            sorted_subs.append(sub1)
         sub_offset = int(args.sub_offset*1000)
         sorted_subs.sort(key=lambda x:(x['st'], x['et']))
         sub_end = sorted_subs[-1]['et']
@@ -379,7 +389,10 @@ def main_worker():
                     sep = ' '
 
             frame_dir = Path(args.result) / f"{st}_{et}/"
-            if not frame_dir.exists():
+            if frame_dir.exists():
+                for img in frame_dir.glob("*.jpg"):
+                    img.unlink()
+            else:
                 frame_dir.mkdir()
             while True:
                 success, frame = vidcap.read()
@@ -393,11 +406,14 @@ def main_worker():
                 #print(st, msec, et, frame_index, has_hard_sub)
                 if  msec < et:
                     frame_indexes[frame_index] = []
-                    if has_hard_sub:
-                        cv2.imwrite(str(frame_dir / f'{frame_index}.jpg'), frame)
+                    cv2.imwrite(str(frame_dir / f'{frame_index}.jpg'), frame)
                 frame_index += 1
                 if (frame_index * 1000 / default_fps) >= et:
                     break
+            img_stems = []
+            for img in frame_dir.glob("*.jpg"):
+                img_stems.append(int(img.stem))
+            img_stems.sort()
             if has_hard_sub:
                 keep_hard_sub = False
                 for child in sub['subs']:
@@ -418,10 +434,6 @@ def main_worker():
                     else:
                         keep_hard_sub = True
 
-                img_stems = []
-                for img in frame_dir.glob("*.jpg"):
-                    img_stems.append(int(img.stem))
-                img_stems.sort()
                 if keep_hard_sub:
                     content_md5 = md5sum(all_sub_txt)
                     all_sub_txt = all_sub_txt.replace("'", "\'")
@@ -439,7 +451,7 @@ def main_worker():
                             frame_indexes[img_stem] = [box[1]]
                         else:
                             last_box = boxes[-1][1]
-                            if last_box == [0, 0, 0, 0]:
+                            if last_box[0] == last_box[1] == last_box[2] == last_box[3] == 0:
                                 frame_indexes[img_stem] = [(left, top, right, bottom)]
                             else:
                                 frame_indexes[img_stem] = [boxes[-1][1]]
@@ -457,7 +469,7 @@ def main_worker():
                             box = box[1]
                         else:
                             box = boxes[-1][1]
-                        if (box[0] == 0 and box[1] == 0) or (box[2] == 0 and box[3] == 0):
+                        if box[0] == box[1] == box[2] == box[3] == 0:
                             continue
                         frame_indexes[img_stem].append(box)
             else:

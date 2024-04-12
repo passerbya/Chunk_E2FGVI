@@ -10,6 +10,7 @@ from pathlib import Path
 import easyocr
 import hashlib
 import cv2
+import shutil
 import logging.handlers
 
 def md5sum(s):
@@ -31,8 +32,9 @@ def recognize(lang, frame_dir, content, sub_box=None):
     temp_file_path = None
     if sub_box is not None and len(sub_box) > 0:
         temp_file_path = img_dir / 'temp'
-        if not temp_file_path.exists():
-            temp_file_path.mkdir()
+        if temp_file_path.exists():
+            shutil.rmtree(temp_file_path)
+        temp_file_path.mkdir()
     width = 0
     for img in img_dir.glob("*.jpg"):
         if temp_file_path is not None:
@@ -109,7 +111,7 @@ def recognize(lang, frame_dir, content, sub_box=None):
                             top = w[1]
                         if w[1] > bottom:
                             bottom = w[1]
-                        offset = bottom - top
+                        offset = (bottom - top)/3
                         left = (left - offset) if (left - offset)>0 else 0
                         right = (right + offset) if (right + offset)<width else width
             logger.info('%s %s %s', s, (left, top, right, bottom), all_txt)
@@ -144,6 +146,7 @@ def recognize(lang, frame_dir, content, sub_box=None):
             box[1][2] += sub_box[2]
             box[1][1] += sub_box[0]
             box[1][3] += sub_box[0]
+        shutil.rmtree(temp_file_path)
     with open(str(Path(frame_dir) / f'{md5sum(content)}_box.json'), 'w', encoding='utf-8') as file:
         json.dump(boxes, file)
     logger.info(len(boxes))
