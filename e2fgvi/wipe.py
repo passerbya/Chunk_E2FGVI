@@ -86,7 +86,7 @@ def create_mask(image, rect, lower_color, upper_color):
     # 定义矩形区域的掩码
     if args.task == 'detext':
         rect_mask = np.zeros_like(image[:, :, 0])
-        for rect_left_top, rect_right_bottom in rect:
+        for rect_left_top, rect_right_bottom, _ in rect:
             cv2.rectangle(rect_mask, rect_left_top, rect_right_bottom, (255, 255, 255), thickness=cv2.FILLED)
         # 应用矩形区域的掩码
         frame_modified = cv2.bitwise_and(image, image, mask=rect_mask)
@@ -102,11 +102,94 @@ def create_mask(image, rect, lower_color, upper_color):
         frame_modified[dilated_mask <= 0] = [0, 0, 0]
     else:
         rect_mask = np.zeros_like(image[:, :, 0])
-        for rect_left_top, rect_right_bottom in rect:
+        for rect_left_top, rect_right_bottom, _ in rect:
             cv2.rectangle(rect_mask, rect_left_top, rect_right_bottom, (255, 255, 255), thickness=cv2.FILLED)
         # 应用矩形区域的掩码
         frame_modified = cv2.bitwise_and(image, image, mask=rect_mask)
     return frame_modified
+
+def get_previous_mask(rect, lower_color, upper_color, frame_index, frame_indexes):
+    if frame_index in frame_indexes and len(frame_indexes[frame_index]) > 0:
+        _frame_index = frame_index
+        npy_path = Path(args.result) / f"{Path(args.video).stem}_npy_pre"
+        if not npy_path.exists():
+            npy_path.mkdir()
+        f_index = 0
+        vidcap = cv2.VideoCapture(args.video)
+        start = max(0, frame_index-100)
+        while True:
+            success, frame = vidcap.read()
+            if not success or f_index >= frame_index:
+                break
+            if f_index < start:
+                f_index += 1
+                continue
+            np.save(str(npy_path/f'{f_index}.npy'), frame)
+            f_index += 1
+        vidcap.release()
+        while frame_index-1>=start:
+            frame_index-=1
+            if frame_index not in frame_indexes:
+                continue
+            _rect = []
+            for box in frame_indexes[frame_index]:
+                _rect_left_top = (box[0], box[1])
+                _rect_right_bottom = (box[2], box[3])
+                _rect.append((_rect_left_top, _rect_right_bottom, box[4]))
+            if len(rect) != len(_rect):
+                return None
+            for box, _box in zip([tup for tup in rect if len(tup[2]) > 0], [_tup for _tup in _rect if len(_tup[2]) > 0]):
+                width_diff = abs((box[1][0]-box[0][0])-(_box[1][0]-_box[0][0]))
+                height_diff = abs((box[1][1]-box[0][1])-(_box[1][1]-_box[0][1]))
+                max_height = max(box[1][1]-box[0][1], _box[1][1]-_box[0][1])
+                if width_diff > max_height/2 or height_diff > max_height/2 or box[2] != _box[2]:
+                    #选区范围超过1/2个字体高度或者文本相似性小于0.8就认为是不同的文字
+                    print(_frame_index, width_diff, height_diff, max_height/2, box[2], _box[2], frame_indexes[frame_index])
+                    return None
+                else:
+                    frame = np.load(str(npy_path/f'{frame_index}.npy'))
+                    frame_modified = create_mask(frame, _rect, lower_color, upper_color)
+                    if frame_modified is not None:
+                        return frame_modified
+        shutil.rmtree(npy_path)
+    return None
+
+def get_next_mask(rect, lower_color, upper_color, frame_index, frame_indexes):
+    if frame_index in frame_indexes and len(frame_indexes[frame_index]) > 0:
+        _frame_index = frame_index
+        f_index = 0
+        vidcap = cv2.VideoCapture(args.video)
+        while frame_index+1<len(frame_indexes):
+            frame_index+=1
+            if frame_index not in frame_indexes:
+                continue
+            _rect = []
+            for box in frame_indexes[frame_index]:
+                _rect_left_top = (box[0], box[1])
+                _rect_right_bottom = (box[2], box[3])
+                _rect.append((_rect_left_top, _rect_right_bottom, box[4]))
+            if len(rect) != len(_rect):
+                return None
+            for box, _box in zip([tup for tup in rect if len(tup[2]) > 0], [_tup for _tup in _rect if len(_tup[2]) > 0]):
+                width_diff = abs((box[1][0]-box[0][0])-(_box[1][0]-_box[0][0]))
+                height_diff = abs((box[1][1]-box[0][1])-(_box[1][1]-_box[0][1]))
+                max_height = max(box[1][1]-box[0][1], _box[1][1]-_box[0][1])
+                if width_diff > max_height/2 or height_diff > max_height/2 or box[2] != _box[2]:
+                    #选区范围超过1/2个字体高度或者文本相似性小于0.8就认为是不同的文字
+                    print(_frame_index, width_diff, height_diff, max_height/2, box[2], _box[2], frame_indexes[frame_index])
+                    return None
+                else:
+                    while f_index < frame_index:
+                        success, frame = vidcap.read()
+                        if not success:
+                            break
+                        f_index += 1
+                    frame_modified = create_mask(frame, _rect, lower_color, upper_color)
+                    if frame_modified is not None:
+                        return frame_modified
+        vidcap.release()
+    return None
+
 #  read frames from video
 def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom, frame_indexes):
     frame_index = 0
@@ -151,10 +234,14 @@ def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom, frame_ind
                     for box in frame_indexes[frame_index]:
                         _rect_left_top = (box[0], box[1])
                         _rect_right_bottom = (box[2], box[3])
-                        rect.append((_rect_left_top, _rect_right_bottom))
+                        rect.append((_rect_left_top, _rect_right_bottom, box[4]))
                 else:
-                    rect = [(rect_left_top, rect_right_bottom)]
+                    rect = [(rect_left_top, rect_right_bottom, '')]
                 frame_modified = create_mask(image, rect, lower_color, upper_color)
+                if frame_modified is None:
+                    frame_modified = get_previous_mask(rect, lower_color, upper_color, frame_index, frame_indexes)
+                if frame_modified is None:
+                    frame_modified = get_next_mask(rect, lower_color, upper_color, frame_index, frame_indexes)
                 if frame_modified is None:
                     npy_file = npy_path / f'{frame_index}.npy'
                     np.save(str(npy_file), image)
@@ -196,7 +283,7 @@ def read_frame_from_videos(npy_path, rect_left_top, rect_right_bottom, frame_ind
                 npy_file = npy_path / f'{frame_index}.npy'
                 np.save(str(npy_file), cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
             else:
-                rect = [(rect_left_top, rect_right_bottom)]
+                rect = [(rect_left_top, rect_right_bottom, '')]
                 frame_modified = create_mask(image, rect, lower_color, upper_color)
                 if frame_modified is None:
                     npy_file = npy_path / f'{frame_index}.npy'
@@ -448,16 +535,18 @@ def main_worker():
                     for i1, img_stem in enumerate(img_stems):
                         box = boxes[i1]
                         if box[0] > 0.8:
+                            box[1].append(all_sub_txt)
                             frame_indexes[img_stem] = [box[1]]
                         else:
                             last_box = boxes[-1][1]
                             if last_box[0] == last_box[1] == last_box[2] == last_box[3] == 0:
-                                frame_indexes[img_stem] = [(left, top, right, bottom)]
+                                frame_indexes[img_stem] = [(left, top, right, bottom, '')]
                             else:
+                                boxes[-1][1].append(all_sub_txt)
                                 frame_indexes[img_stem] = [boxes[-1][1]]
                 else:
                     for img_stem in img_stems:
-                        frame_indexes[img_stem] = [(left, top, right, bottom)]
+                        frame_indexes[img_stem] = [(left, top, right, bottom, '')]
 
                 for child in sub['subs']:
                     if 'boxes' not in child:
@@ -471,10 +560,11 @@ def main_worker():
                             box = boxes[-1][1]
                         if box[0] == box[1] == box[2] == box[3] == 0:
                             continue
+                        box.append(child['txt'])
                         frame_indexes[img_stem].append(box)
             else:
                 for img_stem in img_stems:
-                    frame_indexes[img_stem] = [(left, top, right, bottom)]
+                    frame_indexes[img_stem] = [(left, top, right, bottom, '')]
 
         vidcap.release()
     video_path = str(Path(args.result) / f"{Path(args.video).stem}_{args.task}.mp4")
@@ -536,7 +626,7 @@ def main_worker():
         _crop_right = crop_right
         _crop_bottom = crop_bottom
         for xm in xmask:
-            for mask_left_top, mask_right_bottom in xm[1]:
+            for mask_left_top, mask_right_bottom, _ in xm[1]:
                 _crop_left = min(_crop_left, mask_left_top[0])
                 _crop_top = min(_crop_top, mask_left_top[1])
                 _crop_right = max(_crop_right, mask_right_bottom[0])

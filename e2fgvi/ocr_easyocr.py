@@ -25,6 +25,7 @@ def apply_similarity(s1, s2):
     return (m-distance)/m
 
 def recognize(lang, frame_dir, content, sub_box=None):
+    _content = content
     content = content.lower()
     img_dir = Path(frame_dir)
     logger.info('开始识别%s %s', img_dir, lang)
@@ -147,7 +148,7 @@ def recognize(lang, frame_dir, content, sub_box=None):
             box[1][1] += sub_box[0]
             box[1][3] += sub_box[0]
         shutil.rmtree(temp_file_path)
-    with open(str(Path(frame_dir) / f'{md5sum(content)}_box.json'), 'w', encoding='utf-8') as file:
+    with open(str(Path(frame_dir) / f'{md5sum(_content)}_box.json'), 'w', encoding='utf-8') as file:
         json.dump(boxes, file)
     logger.info(len(boxes))
     logger.info('识别%s %s结束', img_dir, lang)
