@@ -50,6 +50,7 @@ parser.add_argument("-t", "--task", type=str, help='CHOOSE THE TASK：delogo or 
 parser.add_argument("--keep_mask", action='store_true', default=False)
 parser.add_argument("--sub_file", type=str)
 parser.add_argument("--sub_offset", type=float, default=0.0)
+parser.add_argument("--preview", type=int, default=-1)
 parser.add_argument("--hard_codes", nargs='+', type=str, default='【硬】')
 
 args = parser.parse_args()
@@ -361,6 +362,17 @@ def main_worker():
         height, width = frame.shape[:-1]
         size = (width, height)
         video_stream.release()
+    if args.preview > 0 and args.use_mp4:
+        preview_frame = args.preview * default_fps / 1000
+        preview_begin = preview_frame - default_fps
+        if preview_begin < 0:
+            preview_begin = 0
+        preview_begin = int(preview_begin * 1000 / default_fps)
+        preview_path = str(Path(args.result) / f"{Path(args.video).stem}_preview_{preview_begin}_{preview_begin+2000}.mp4")
+        command = '{} -ss {}ms -t 2 -i {} -y {}'.format(ffmpegExe, preview_begin, args.video, preview_path)
+        print(command)
+        subprocess.call(command, shell=True)
+        args.video = preview_path
 
     top = max(0, args.box[0])
     bottom = min(height, args.box[1])
