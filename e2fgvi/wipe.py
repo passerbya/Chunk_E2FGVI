@@ -368,7 +368,7 @@ def main_worker():
         if preview_begin < 0:
             preview_begin = 0
         preview_begin = int(preview_begin * 1000 / default_fps)
-        preview_path = str(Path(args.result) / f"{Path(args.video).stem}_preview_{preview_begin}_{preview_begin+2000}.mp4")
+        preview_path = str(Path(args.result) / f"{Path(args.video).stem}_preview_{args.preview}.mp4")
         command = '{} -ss {}ms -t 2 -i {} -y {}'.format(ffmpegExe, preview_begin, args.video, preview_path)
         print(command)
         subprocess.call(command, shell=True)
