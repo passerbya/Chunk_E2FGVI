@@ -362,7 +362,7 @@ def main_worker():
         height, width = frame.shape[:-1]
         size = (width, height)
         video_stream.release()
-    if args.preview > 0 and args.use_mp4:
+    if args.preview >= 0 and args.use_mp4:
         preview_frame = args.preview * default_fps / 1000
         preview_begin = preview_frame - default_fps
         if preview_begin < 0:
