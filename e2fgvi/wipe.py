@@ -399,7 +399,11 @@ def main_worker():
             sorted_subs.append(sub1)
         sub_offset = int(args.sub_offset*1000)
         sorted_subs.sort(key=lambda x:(x['st'], x['et']))
-        sub_end = sorted_subs[-1]['et']
+        sub_end = 0
+        for sub in sorted_subs:
+            et = sub['et']
+            if et > sub_end:
+                sub_end = et
         for i1, sub in enumerate(sorted_subs):
             st1 = sub['st']
             et1 = sub['et']
