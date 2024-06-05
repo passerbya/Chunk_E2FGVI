@@ -403,7 +403,7 @@ def main_worker():
         for sub in sorted_subs:
             et = sub['et']
             if et > sub_end:
-                sub_end = et
+                sub_end = et + 100
         for i1, sub in enumerate(sorted_subs):
             st1 = sub['st']
             et1 = sub['et']
