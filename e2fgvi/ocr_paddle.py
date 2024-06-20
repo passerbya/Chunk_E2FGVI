@@ -33,11 +33,11 @@ def recognize(lang, frame_dir, content, sub_box=None):
     os.environ["FLAGS_fraction_of_gpu_memory_to_use"] = '0.01'
     os.environ["FLAGS_gpu_memory_limit_mb"] = '2048'
     if lang == 'ch':
-        ocr = PaddleOCR(det_model_dir='/root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_server_infer', rec_model_dir='/root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_server_infer', use_angle_cls=False, use_gpu=True, lang=lang)
+        ocr = PaddleOCR(det_model_dir='/root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_server_infer', rec_model_dir='/root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_server_infer', use_angle_cls=True, det_db_unclip_ratio=2.0, use_gpu=True, lang=lang)
     elif lang == 'en':
-        ocr = PaddleOCR(det_model_dir='/root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_server_infer', rec_model_dir='/root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_server_infer', use_angle_cls=False, use_gpu=True, lang='ch')
+        ocr = PaddleOCR(det_model_dir='/root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_server_infer', rec_model_dir='/root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_server_infer', use_angle_cls=True, det_db_unclip_ratio=2.0, use_gpu=True, lang='ch')
     else:
-        ocr = PaddleOCR(use_angle_cls=False, use_gpu=True, lang=lang)
+        ocr = PaddleOCR(use_angle_cls=True, det_db_unclip_ratio=2.0, use_gpu=True, lang=lang)
 
     _content = content
     content = content.lower()
