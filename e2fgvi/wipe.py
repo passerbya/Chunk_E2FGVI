@@ -524,12 +524,12 @@ def main_worker():
                     if not child['is_hard_sub']:
                         continue
                     content_md5 = md5sum(txt)
-                    txt = txt.replace("'", "\'")
+                    txt = txt.replace('"', '\\"')
                     if child['wipe'] == 1:
                         if lang in ('bn','th','fa','ug','ur','ps','so'):
-                            cmd = f"source /etc/profile_easyocr && python3 {str(script_dir/'ocr_easyocr.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{txt}'"
+                            cmd = f"source /etc/profile_easyocr && python3 {str(script_dir/'ocr_easyocr.py')} --lang {lang} --frame_dir {str(frame_dir)} --content \"{txt}\""
                         else:
-                            cmd = f"source /etc/profile_paddle && python3 {str(script_dir/'ocr_paddle.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{txt}'"
+                            cmd = f"source /etc/profile_paddle && python3 {str(script_dir/'ocr_paddle.py')} --lang {lang} --frame_dir {str(frame_dir)} --content \"{txt}\""
                         print(cmd)
                         subprocess.check_output(cmd, shell=True).decode('utf-8', 'ignore')
                         with open(str(Path(frame_dir) / f'{content_md5}_box.json'), 'r', encoding='utf-8') as file:
@@ -539,11 +539,11 @@ def main_worker():
 
                 if keep_hard_sub:
                     content_md5 = md5sum(all_sub_txt)
-                    all_sub_txt = all_sub_txt.replace("'", "\'")
+                    all_sub_txt = all_sub_txt.replace('"', '\\"')
                     if lang in ('bn','th','fa','ug','ur','ps','so'):
-                        cmd = f"source /etc/profile_easyocr && python3 {str(script_dir/'ocr_easyocr.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{all_sub_txt}' --box {top} {bottom} {left} {right}"
+                        cmd = f"source /etc/profile_easyocr && python3 {str(script_dir/'ocr_easyocr.py')} --lang {lang} --frame_dir {str(frame_dir)} --content \"{all_sub_txt}\" --box {top} {bottom} {left} {right}"
                     else:
-                        cmd = f"source /etc/profile_paddle && python3 {str(script_dir/'ocr_paddle.py')} --lang {lang} --frame_dir {str(frame_dir)} --content '{all_sub_txt}' --box {top} {bottom} {left} {right}"
+                        cmd = f"source /etc/profile_paddle && python3 {str(script_dir/'ocr_paddle.py')} --lang {lang} --frame_dir {str(frame_dir)} --content \"{all_sub_txt}\" --box {top} {bottom} {left} {right}"
                     print(cmd)
                     subprocess.check_output(cmd, shell=True).decode('utf-8', 'ignore')
                     with open(str(Path(frame_dir) / f'{content_md5}_box.json'), 'r', encoding='utf-8') as file:
