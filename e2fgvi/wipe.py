@@ -97,10 +97,15 @@ def create_mask(image, rect, lower_color, upper_color):
         kernel = np.ones((args.expand, args.expand), np.uint8)
         # 对掩码进行膨胀操作
         dilated_mask = cv2.dilate(mask, kernel, iterations=1)
-        if len(frame_modified[dilated_mask > 0]) == 0:
+        # 获取满足条件的索引
+        mask_indices = dilated_mask > 0
+        # 如果没有满足条件的像素，返回 None
+        if not mask_indices.any():
             return None
-        frame_modified[dilated_mask > 0] = [255, 255, 255]
-        frame_modified[dilated_mask <= 0] = [0, 0, 0]
+        # 先把所有像素设置为 [0, 0, 0]
+        frame_modified[:] = [0, 0, 0]
+        # 只对满足条件的像素设置为 [255, 255, 255]
+        frame_modified[mask_indices] = [255, 255, 255]
     else:
         rect_mask = np.zeros_like(image[:, :, 0])
         for rect_left_top, rect_right_bottom, _ in rect:
