@@ -100,8 +100,8 @@ def create_mask(image, rect, lower_color, upper_color):
         # 获取满足条件的索引
         mask_indices = dilated_mask > 0
         # 如果没有满足条件的像素，返回 None
-        if not mask_indices.any():
-            return None
+        #if not mask_indices.any():
+        #    return None
         # 先把所有像素设置为 [0, 0, 0]
         frame_modified[:] = [0, 0, 0]
         # 只对满足条件的像素设置为 [255, 255, 255]
