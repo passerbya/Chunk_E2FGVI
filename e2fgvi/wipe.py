@@ -654,8 +654,12 @@ def main_worker():
                 _crop_bottom = max(_crop_bottom, mask_right_bottom[1])
         #print((crop_left, crop_top, crop_right, crop_bottom), (_crop_left, _crop_top, _crop_right, _crop_bottom))
 
-        _xfram = [xf.crop((_crop_left, _crop_top, _crop_right, _crop_bottom)) for xf in xfram]
-        _xmask = [xm[0].crop((_crop_left, _crop_top, _crop_right, _crop_bottom)) for xm in xmask]
+        if (crop_left, crop_top, crop_right, crop_bottom) == (_crop_left, _crop_top, _crop_right, _crop_bottom):
+            _xfram = [xf.copy() for xf in xfram]
+            _xmask = [xm[0].copy() for xm in xmask]
+        else:
+            _xfram = [xf.crop((_crop_left, _crop_top, _crop_right, _crop_bottom)) for xf in xfram]
+            _xmask = [xm[0].crop((_crop_left, _crop_top, _crop_right, _crop_bottom)) for xm in xmask]
         w, h = _xfram[0].size
         imgs = to_tensors()(_xfram).unsqueeze(0) * 2 - 1
         frames = [np.array(f).astype(np.uint8) for f in _xfram]
@@ -715,8 +719,11 @@ def main_worker():
                     img = np.array(pred_imgs[i]).astype(
                         np.uint8) * binary_masks[idx] + frames[idx] * (
                                   1 - binary_masks[idx])
-                    xf = np.array(xfram[idx].convert("RGB"))
-                    xf[_crop_top:_crop_bottom, _crop_left:_crop_right] = img
+                    if (crop_left, crop_top, crop_right, crop_bottom) == (_crop_left, _crop_top, _crop_right, _crop_bottom):
+                        xf = img
+                    else:
+                        xf = np.array(xfram[idx].convert("RGB"))
+                        xf[_crop_top:_crop_bottom, _crop_left:_crop_right] = img
                     if comp_frames[idx] is None:
                         comp_frames[idx] = xf
                     else:
