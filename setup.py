@@ -10,7 +10,7 @@ URL = 'https://github.com/passerbya/Chunk_E2FGVI'
 EMAIL = '84305424@qq.com'
 AUTHOR = 'wangzh'
 REQUIRES_PYTHON = '>=3.7.0'
-VERSION = '1.1.2'
+VERSION = '1.1.3'
 
 HERE = Path(__file__).parent
 
