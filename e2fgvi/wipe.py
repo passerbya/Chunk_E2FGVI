@@ -367,6 +367,8 @@ def main_worker():
         height, width = frame.shape[:-1]
         size = (width, height)
         video_stream.release()
+    else:
+        width, height = size
     if args.preview >= 0 and args.use_mp4:
         preview_frame = args.preview * default_fps / 1000
         preview_begin = preview_frame - default_fps
@@ -654,7 +656,7 @@ def main_worker():
                 _crop_bottom = max(_crop_bottom, mask_right_bottom[1])
         #print((crop_left, crop_top, crop_right, crop_bottom), (_crop_left, _crop_top, _crop_right, _crop_bottom))
 
-        if (crop_left, crop_top, crop_right, crop_bottom) == (_crop_left, _crop_top, _crop_right, _crop_bottom):
+        if (0, 0, width, height) == (_crop_left, _crop_top, _crop_right, _crop_bottom):
             _xfram = [xf.copy() for xf in xfram]
             _xmask = [xm[0].copy() for xm in xmask]
         else:
@@ -719,7 +721,7 @@ def main_worker():
                     img = np.array(pred_imgs[i]).astype(
                         np.uint8) * binary_masks[idx] + frames[idx] * (
                                   1 - binary_masks[idx])
-                    if (crop_left, crop_top, crop_right, crop_bottom) == (_crop_left, _crop_top, _crop_right, _crop_bottom):
+                    if (0, 0, width, height) == (_crop_left, _crop_top, _crop_right, _crop_bottom):
                         xf = img
                     else:
                         xf = np.array(xfram[idx].convert("RGB"))
