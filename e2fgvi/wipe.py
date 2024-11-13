@@ -607,6 +607,13 @@ def main_worker():
     crop_bottom = min(height, args.box[1]+20)
     crop_left = max(0, args.box[2]-20)
     crop_right = min(width, args.box[3]+20)
+    if crop_top > height or crop_bottom > height or crop_left > width or crop_right > width:
+        writer.release()
+        out_path = str(Path(args.result) / f"{Path(args.video).stem}_out.mp4")
+        os.rename(video_path, out_path)
+        print(f'coord error: {out_path}.')
+        return
+
     while True:
         if next_x_frames is not None:
             x_frames = next_x_frames
@@ -654,7 +661,8 @@ def main_worker():
                 _crop_top = min(_crop_top, mask_left_top[1])
                 _crop_right = max(_crop_right, mask_right_bottom[0])
                 _crop_bottom = max(_crop_bottom, mask_right_bottom[1])
-        #print((crop_left, crop_top, crop_right, crop_bottom), (_crop_left, _crop_top, _crop_right, _crop_bottom))
+        #print((crop_left, crop_top, crop_right, crop_bottom), (_crop_left, _crop_top, _crop_right, _crop_bottom), (0, 0, width, height))
+        #[print(xf.size) for xf in xfram]
 
         if (0, 0, width, height) == (_crop_left, _crop_top, _crop_right, _crop_bottom):
             _xfram = [xf.copy() for xf in xfram]
