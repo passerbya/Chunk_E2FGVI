@@ -414,6 +414,7 @@ def main_worker():
         for i1, sub in enumerate(sorted_subs):
             st1 = sub['st']
             et1 = sub['et']
+            offset = sub_offset
             if i1 > 1:
                 et0 = sorted_subs[i1-1]['et']
                 if et0 < st1:
@@ -423,7 +424,7 @@ def main_worker():
                         offset -= 1
                 elif et0 == st1:
                     offset = 0
-                sub['st'] = (st1-offset) if (st1-offset)>0 else 0
+            sub['st'] = (st1-offset) if (st1-offset)>0 else 0
             if i1 < len(sorted_subs)-1:
                 st2 = sorted_subs[i1+1]['st']
                 offset = sub_offset
