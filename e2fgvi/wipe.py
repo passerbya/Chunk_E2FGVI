@@ -54,10 +54,6 @@ parser.add_argument("--preview", type=int, default=-1)
 parser.add_argument("--hard_codes", nargs='+', type=str, default='【硬】')
 
 args = parser.parse_args()
-
-ref_length = args.step  # ref_step
-num_ref = args.num_ref
-neighbor_stride = args.neighbor_stride
 default_fps = args.savefps
 
 def md5sum(s):
@@ -69,16 +65,16 @@ def md5sum(s):
 # sample reference frames from the whole video
 def get_ref_index(f, neighbor_ids, length):
     ref_index = []
-    if num_ref == -1:
-        for i in range(0, length, ref_length):
+    if args.num_ref == -1:
+        for i in range(0, length, args.step):
             if i not in neighbor_ids:
                 ref_index.append(i)
     else:
-        start_idx = max(0, f - ref_length * (num_ref // 2))
-        end_idx = min(length, f + ref_length * (num_ref // 2))
-        for i in range(start_idx, end_idx + 1, ref_length):
+        start_idx = max(0, f - args.step * (args.num_ref // 2))
+        end_idx = min(length, f + args.step * (args.num_ref // 2))
+        for i in range(start_idx, end_idx + 1, args.step):
             if i not in neighbor_ids:
-                if len(ref_index) > num_ref:
+                if len(ref_index) > args.num_ref:
                     break
                 ref_index.append(i)
     return ref_index
@@ -369,6 +365,12 @@ def main_worker():
         video_stream.release()
     else:
         width, height = size
+
+    if min(width, height) > 1080:
+        args.step=3
+        args.neighbor_stride=3
+        args.frame_stride=9
+
     if args.preview >= 0 and args.use_mp4:
         preview_frame = args.preview * default_fps / 1000
         preview_begin = preview_frame - default_fps
@@ -620,7 +622,7 @@ def main_worker():
             x_frames = next_x_frames
             x_masks = next_x_masks
             last_comp_frames = comp_frames[framestride:]
-            comp_frames = [None] * (len(x_frames) + neighbor_stride)
+            comp_frames = [None] * (len(x_frames) + args.neighbor_stride)
             for idx in range(len(last_comp_frames)):
                 comp_frames[idx] = last_comp_frames[idx]
         else:
@@ -628,7 +630,7 @@ def main_worker():
                 x_frames, x_masks = next(generator)
             except StopIteration:
                 break
-            comp_frames = [None] * (framestride + neighbor_stride)
+            comp_frames = [None] * (framestride + args.neighbor_stride)
         try:
             next_x_frames, next_x_masks = next(generator)
         except StopIteration:
@@ -648,7 +650,7 @@ def main_worker():
         xmask = x_masks.copy()
 
         if next_x_frames is not None:
-            for xframeppend in range(0, min(len(next_x_frames), neighbor_stride)):
+            for xframeppend in range(0, min(len(next_x_frames), args.neighbor_stride)):
                 xfram.append(next_x_frames[xframeppend])
                 xmask.append(next_x_masks[xframeppend])
 
@@ -689,19 +691,19 @@ def main_worker():
 
         #if (itern < strides - 1):
         if next_x_frames is not None:
-            loopendframe = stride_length + min(len(next_x_frames), neighbor_stride)
+            loopendframe = stride_length + min(len(next_x_frames), args.neighbor_stride)
         else:
             loopendframe = stride_length
 
         # completing holes by e2fgvi
 
-        #print(loopstartframe, loopendframe, neighbor_stride)
-        for f in tqdm(range(loopstartframe, loopendframe, neighbor_stride)):
+        #print(loopstartframe, loopendframe, args.neighbor_stride)
+        for f in tqdm(range(loopstartframe, loopendframe, args.neighbor_stride)):
             #print(f)
-            #print(f'meh {max(loopstartframe, f - neighbor_stride)} muh {min(loopendframe, f + neighbor_stride + 1)}')
+            #print(f'meh {max(loopstartframe, f - args.neighbor_stride)} muh {min(loopendframe, f + args.neighbor_stride + 1)}')
             neighbor_ids = [
-                i for i in range(max(loopstartframe, f - neighbor_stride),
-                                 min(loopendframe, f + neighbor_stride + 1))
+                i for i in range(max(loopstartframe, f - args.neighbor_stride),
+                                 min(loopendframe, f + args.neighbor_stride + 1))
             ]
             # The frame +- 5 frames before or after.  Beginning: zero frames before.   End: 0 frames after.
 
@@ -740,7 +742,7 @@ def main_worker():
                     else:
                         comp_frames[idx] = comp_frames[idx].astype(np.float32) * 0.5 + xf.astype(np.float32) * 0.5
         # saving videos
-        video_length = len(comp_frames) - neighbor_stride
+        video_length = len(comp_frames) - args.neighbor_stride
         print('Saving videos...', video_length)
         for f in range(video_length):
             if comp_frames[f] is None:
